@@ -1,0 +1,20 @@
+{
+  "name": "ocean-enterprises",
+  "version": "1.0.0",
+  "description": "Ocean Enterprises - Business Management System for Water Supply & Beverage Distribution",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "seed": "node server/db/seed.js",
+    "build": "npm run build --prefix client",
+    "dev:client": "npm run dev --prefix client",
+    "test": "node server/db/seed.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3"
+  }
+}
