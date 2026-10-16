@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const postgres = require('./postgres');
 
 // Determine storage path (supports local development and Vercel serverless environments)
 const IS_SERVERLESS = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
@@ -109,7 +110,11 @@ class Statement {
     this.sql = sql.trim();
   }
 
-  run(...params) {
+  run(...rawParams) {
+    const params = rawParams.length === 1 && Array.isArray(rawParams[0]) ? rawParams[0] : rawParams;
+    if (postgres.isPostgresConfigured()) {
+      return postgres.run(this.sql, params);
+    }
     const s = this.sql;
 
     // 1. INSERT INTO users
@@ -464,14 +469,28 @@ class Statement {
       return { changes: 0 };
     }
 
-    if (/UPDATE deliveries SET status = \?,\s*delivered_at =/i.test(s)) {
-      const [status, delivered_at, id] = params;
-      const deliv = store.deliveries.find(d => d.id === Number(id));
+    if (/UPDATE deliveries SET status =/i.test(s)) {
+      const id = Number(params[params.length - 1]);
+      const status = params[0];
+      const deliv = store.deliveries.find(d => d.id === id);
       if (deliv) {
         deliv.status = status;
-        deliv.delivered_at = delivered_at;
+        if (params.length > 2 && params[1]) deliv.driver_notes = params[1];
+        if (status === 'Delivered') deliv.delivered_at = new Date().toISOString();
         const ord = store.orders.find(o => o.id === deliv.order_id);
         if (ord) ord.delivery_status = status;
+        saveStore();
+        return { changes: 1 };
+      }
+      return { changes: 0 };
+    }
+
+    if (/UPDATE water_entries SET payment_status =/i.test(s)) {
+      const id = Number(params[params.length - 1]);
+      const status = params.length === 2 ? params[0] : 'Paid';
+      const w = store.water_entries.find(item => item.id === id);
+      if (w) {
+        w.payment_status = status;
         saveStore();
         return { changes: 1 };
       }
@@ -523,7 +542,11 @@ class Statement {
     return { changes: 1 };
   }
 
-  get(...params) {
+  get(...rawParams) {
+    const params = rawParams.length === 1 && Array.isArray(rawParams[0]) ? rawParams[0] : rawParams;
+    if (postgres.isPostgresConfigured()) {
+      return postgres.getOne(this.sql, params);
+    }
     const s = this.sql;
 
     // COUNT(*) FROM users
@@ -544,7 +567,10 @@ class Statement {
     // SELECT ... FROM users WHERE id = ?
     if (/SELECT .* FROM users WHERE id = \?/i.test(s)) {
       const u = store.users.find(user => user.id === Number(params[0]));
-      return u ? { ...u } : undefined;
+      if (!u) return undefined;
+      const copy = { ...u };
+      delete copy.password_hash;
+      return copy;
     }
 
     // SELECT * FROM customers WHERE id = ?
@@ -749,16 +775,39 @@ class Statement {
       return { total_water_sold };
     }
 
-    // Specific order
-    if (/SELECT \* FROM orders WHERE id = \?/i.test(s)) {
+    // Specific order lookup (supports both direct and joined queries)
+    if (/FROM orders/i.test(s) && /WHERE (?:o\.)?id = \?/i.test(s)) {
       const ord = store.orders.find(o => o.id === Number(params[0]));
-      return ord ? { ...ord } : undefined;
+      if (!ord) return undefined;
+      const c = store.customers.find(item => item.id === ord.customer_id) || {};
+      return {
+        ...ord,
+        customer_name: c.name || '',
+        business_name: c.business_name || '',
+        customer_phone: c.phone || '',
+        customer_whatsapp: c.whatsapp_number || c.phone || '',
+        customer_address: c.address || ''
+      };
+    }
+
+    // Delivery lookup by ID or order_id
+    if (/FROM deliveries/i.test(s) && /WHERE (?:d\.)?id = \?/i.test(s)) {
+      const d = store.deliveries.find(item => item.id === Number(params[0]));
+      return d ? { ...d } : undefined;
+    }
+    if (/FROM deliveries/i.test(s) && /WHERE (?:d\.)?order_id = \?/i.test(s)) {
+      const d = store.deliveries.find(item => item.order_id === Number(params[0]));
+      return d ? { ...d } : undefined;
     }
 
     return undefined;
   }
 
-  all(...params) {
+  all(...rawParams) {
+    const params = rawParams.length === 1 && Array.isArray(rawParams[0]) ? rawParams[0] : rawParams;
+    if (postgres.isPostgresConfigured()) {
+      return postgres.getAll(this.sql, params);
+    }
     const s = this.sql;
 
     // 1. Customers listing
@@ -1007,9 +1056,40 @@ class Statement {
     if (/FROM users/i.test(s)) return [...store.users];
     if (/FROM customers/i.test(s)) return [...store.customers];
     if (/FROM products/i.test(s)) return [...store.products];
-    if (/FROM orders/i.test(s)) return [...store.orders];
+    if (/FROM orders/i.test(s)) {
+      let list = [...store.orders];
+      if (/WHERE customer_id = \?/i.test(s)) {
+        list = list.filter(o => o.customer_id === Number(params[0]));
+      }
+      if (/payment_status != 'Paid'/i.test(s)) {
+        list = list.filter(o => o.payment_status !== 'Paid');
+      }
+      if (/delivery_status != 'Cancelled'/i.test(s)) {
+        list = list.filter(o => o.delivery_status !== 'Cancelled');
+      }
+      return list;
+    }
+    if (/FROM order_items/i.test(s)) {
+      if (/WHERE order_id = \?/i.test(s)) {
+        return store.order_items.filter(oi => oi.order_id === Number(params[0]));
+      }
+      return [...store.order_items];
+    }
+    if (/FROM water_entries/i.test(s)) {
+      let list = [...store.water_entries];
+      if (/WHERE customer_id = \?/i.test(s)) {
+        list = list.filter(w => w.customer_id === Number(params[0]));
+      }
+      if (/payment_status = 'Pending'/i.test(s)) {
+        list = list.filter(w => w.payment_status === 'Pending');
+      }
+      return list;
+    }
     if (/FROM deliveries/i.test(s)) return [...store.deliveries];
     if (/FROM payments/i.test(s)) return [...store.payments];
+    if (/FROM business_settings/i.test(s)) {
+      return Object.entries(store.business_settings || {}).map(([key, value]) => ({ key, value }));
+    }
 
     return [];
   }
@@ -1020,11 +1100,19 @@ const db = {
     return new Statement(sql);
   },
   exec(sql) {
-    // schema commands are handled gracefully
+    if (postgres.isPostgresConfigured()) {
+      return postgres.query(sql);
+    }
     return true;
   },
   pragma(setting) {
     return true;
+  },
+  transaction(callback) {
+    if (postgres.isPostgresConfigured()) {
+      return postgres.transaction(callback);
+    }
+    return callback(this);
   },
   _getStore() {
     return store;

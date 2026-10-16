@@ -52,11 +52,17 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Unmatched API requests must return 404 JSON (prevents returning index.html to API callers)
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'API endpoint not found', path: req.originalUrl || req.path });
+});
+
 // Serve frontend in production if built
 const clientDist = path.join(__dirname, '..', 'client', 'dist');
 app.use(express.static(clientDist));
 
 app.use((req, res) => {
+
   const indexPath = path.join(clientDist, 'index.html');
   res.sendFile(indexPath, (err) => {
     if (err) {

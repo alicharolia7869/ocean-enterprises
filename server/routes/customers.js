@@ -5,7 +5,7 @@ const { authMiddleware } = require('../middleware/auth');
 const router = express.Router();
 
 // GET /api/customers - List all customers with computed financial metrics
-router.get('/', authMiddleware, (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   try {
     const { search, type } = req.query;
     let query = `
@@ -16,7 +16,7 @@ router.get('/', authMiddleware, (req, res) => {
           COALESCE((SELECT SUM(total_amount) FROM water_entries w WHERE w.customer_id = c.id), 0)
         ) as total_amount,
         (
-          COALESCE((SELECT SUM(total_amount - paid_amount) FROM orders o WHERE o.customer_id = c.id AND o.payment_status != 'Paid'), 0) +
+          COALESCE((SELECT SUM(total_amount - paid_amount) FROM orders o WHERE o.customer_id = c.id AND o.payment_status != 'Paid' AND o.delivery_status != 'Cancelled'), 0) +
           COALESCE((SELECT SUM(total_amount) FROM water_entries w WHERE w.customer_id = c.id AND w.payment_status = 'Pending'), 0)
         ) as balance_pending,
         (
@@ -43,16 +43,18 @@ router.get('/', authMiddleware, (req, res) => {
 
     query += ` ORDER BY c.business_name ASC, c.name ASC`;
 
-    const customers = db.prepare(query).all(...params);
+    const customers = await db.prepare(query).all(...params);
 
     // Format customer response
-    const formatted = customers.map(c => {
+    const formatted = (customers || []).map(c => {
       const latestDate = [c.last_order_date, c.last_water_date].filter(Boolean).sort().reverse()[0] || null;
+      const totalAmt = parseFloat(c.total_amount) || 0;
+      const balancePending = parseFloat(c.balance_pending) || 0;
       return {
         ...c,
-        total_amount: Math.round(c.total_amount),
-        balance_pending: Math.round(c.balance_pending),
-        payment_status: c.balance_pending <= 0 ? 'Paid' : 'Pending',
+        total_amount: Math.round(totalAmt),
+        balance_pending: Math.round(balancePending),
+        payment_status: balancePending <= 0 ? 'Paid' : 'Pending',
         last_active_date: latestDate
       };
     });
@@ -65,106 +67,107 @@ router.get('/', authMiddleware, (req, res) => {
 });
 
 // GET /api/customers/:id - Detailed customer profile with order ledger & monthly breakdown
-router.get('/:id', authMiddleware, (req, res) => {
+router.get('/:id', authMiddleware, async (req, res) => {
   try {
-    const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
+    const customer = await db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' });
     }
 
     // Customer orders
-    const orders = db.prepare(`
-      SELECT o.*,
-        (SELECT json_group_array(json_object(
-          'id', oi.id,
-          'product_id', oi.product_id,
-          'product_name', oi.product_name,
-          'quantity', oi.quantity,
-          'price', oi.price,
-          'subtotal', oi.subtotal
-        )) FROM order_items oi WHERE oi.order_id = o.id) as items
-      FROM orders o
-      WHERE o.customer_id = ?
-      ORDER BY o.order_date DESC
+    const rawOrders = await db.prepare(`
+      SELECT * FROM orders 
+      WHERE customer_id = ? 
+      ORDER BY order_date DESC
     `).all(req.params.id);
 
-    const parsedOrders = orders.map(o => ({
-      ...o,
-      items: JSON.parse(o.items || '[]')
-    }));
+    // Fetch order items for each order
+    const parsedOrders = [];
+    for (const o of rawOrders || []) {
+      const items = await db.prepare(`
+        SELECT * FROM order_items 
+        WHERE order_id = ?
+      `).all(o.id);
+      parsedOrders.push({
+        ...o,
+        total_amount: parseFloat(o.total_amount) || 0,
+        paid_amount: parseFloat(o.paid_amount) || 0,
+        items: items || []
+      });
+    }
 
     // Customer water entries
-    const waterEntries = db.prepare(`
+    const waterEntries = await db.prepare(`
       SELECT w.*, p.name as product_name, p.size as product_size
       FROM water_entries w
       LEFT JOIN products p ON w.product_id = p.id
       WHERE w.customer_id = ?
-      ORDER BY w.date DESC, w.time DESC
+      ORDER BY w.date DESC, w.created_at DESC
     `).all(req.params.id);
 
     // Customer payments
-    const payments = db.prepare(`
+    const payments = await db.prepare(`
       SELECT * FROM payments 
       WHERE customer_id = ? 
       ORDER BY payment_date DESC
     `).all(req.params.id);
 
-    // Monthly aggregates for this customer
-    const monthlyStats = db.prepare(`
-      SELECT 
-        month,
-        SUM(water_units) as total_water_units,
-        SUM(order_count) as total_orders,
-        SUM(sales) as total_sales,
-        SUM(paid) as total_paid,
-        SUM(pending) as total_pending
-      FROM (
-        -- Water entries
-        SELECT 
-          strftime('%Y-%m', date) as month,
-          SUM(quantity) as water_units,
-          0 as order_count,
-          SUM(total_amount) as sales,
-          SUM(CASE WHEN payment_status = 'Paid' THEN total_amount ELSE 0 END) as paid,
-          SUM(CASE WHEN payment_status = 'Pending' THEN total_amount ELSE 0 END) as pending
-        FROM water_entries
-        WHERE customer_id = ?
-        GROUP BY strftime('%Y-%m', date)
+    // Compute monthly aggregates for customer in a dialect-agnostic manner
+    const monthsMap = {};
 
-        UNION ALL
+    (waterEntries || []).forEach(w => {
+      const m = (w.date ? String(w.date) : '').slice(0, 7);
+      if (!m) return;
+      if (!monthsMap[m]) {
+        monthsMap[m] = { month: m, total_water_units: 0, total_orders: 0, total_sales: 0, total_paid: 0, total_pending: 0 };
+      }
+      const qty = parseInt(w.quantity, 10) || 0;
+      const amt = parseFloat(w.total_amount) || 0;
+      monthsMap[m].total_water_units += qty;
+      monthsMap[m].total_sales += amt;
+      if (w.payment_status === 'Paid') {
+        monthsMap[m].total_paid += amt;
+      } else {
+        monthsMap[m].total_pending += amt;
+      }
+    });
 
-        -- Regular orders
-        SELECT 
-          strftime('%Y-%m', order_date) as month,
-          0 as water_units,
-          COUNT(*) as order_count,
-          SUM(total_amount) as sales,
-          SUM(paid_amount) as paid,
-          SUM(total_amount - paid_amount) as pending
-        FROM orders
-        WHERE customer_id = ? AND delivery_status != 'Cancelled'
-        GROUP BY strftime('%Y-%m', order_date)
-      )
-      GROUP BY month
-      ORDER BY month DESC
-    `).all(req.params.id, req.params.id);
+    (parsedOrders || []).forEach(o => {
+      if (o.delivery_status === 'Cancelled') return;
+      const m = (o.order_date ? String(o.order_date) : '').slice(0, 7);
+      if (!m) return;
+      if (!monthsMap[m]) {
+        monthsMap[m] = { month: m, total_water_units: 0, total_orders: 0, total_sales: 0, total_paid: 0, total_pending: 0 };
+      }
+      const total = parseFloat(o.total_amount) || 0;
+      const paid = parseFloat(o.paid_amount) || 0;
+      monthsMap[m].total_orders += 1;
+      monthsMap[m].total_sales += total;
+      monthsMap[m].total_paid += paid;
+      monthsMap[m].total_pending += Math.max(0, total - paid);
+    });
+
+    const monthlyStats = Object.values(monthsMap).sort((a, b) => b.month.localeCompare(a.month));
 
     // Calculate overall balance
-    const totalSales = (monthlyStats || []).reduce((acc, m) => acc + (m.total_sales || 0), 0);
-    const totalPaid = (monthlyStats || []).reduce((acc, m) => acc + (m.total_paid || 0), 0);
+    const totalSales = monthlyStats.reduce((acc, m) => acc + (m.total_sales || 0), 0);
+    const totalPaid = monthlyStats.reduce((acc, m) => acc + (m.total_paid || 0), 0);
     const pendingBalance = Math.max(0, totalSales - totalPaid);
 
     res.json({
       customer: {
         ...customer,
-        totalSales,
-        totalPaid,
-        pendingBalance,
+        totalSales: Math.round(totalSales),
+        total_sales: Math.round(totalSales),
+        totalPaid: Math.round(totalPaid),
+        total_paid: Math.round(totalPaid),
+        pendingBalance: Math.round(pendingBalance),
+        pending_balance: Math.round(pendingBalance),
         payment_status: pendingBalance <= 0 ? 'Paid' : 'Pending'
       },
       orders: parsedOrders,
-      waterEntries,
-      payments,
+      waterEntries: waterEntries || [],
+      payments: payments || [],
       monthlyStats
     });
   } catch (err) {
@@ -174,7 +177,7 @@ router.get('/:id', authMiddleware, (req, res) => {
 });
 
 // POST /api/customers - Create new customer
-router.post('/', authMiddleware, (req, res) => {
+router.post('/', authMiddleware, async (req, res) => {
   try {
     const { name, business_name, phone, whatsapp_number, address, latitude, longitude, customer_type, notes } = req.body;
     if (!name || !phone || !address) {
@@ -186,7 +189,7 @@ router.post('/', authMiddleware, (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const result = insert.run(
+    const result = await insert.run(
       name.trim(),
       (business_name || '').trim(),
       phone.trim(),
@@ -198,7 +201,7 @@ router.post('/', authMiddleware, (req, res) => {
       notes || ''
     );
 
-    const newCustomer = db.prepare('SELECT * FROM customers WHERE id = ?').get(result.lastInsertRowid);
+    const newCustomer = await db.prepare('SELECT * FROM customers WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json({ message: 'Customer added successfully', customer: newCustomer });
   } catch (err) {
     console.error('Error creating customer:', err);
@@ -207,7 +210,7 @@ router.post('/', authMiddleware, (req, res) => {
 });
 
 // PUT /api/customers/:id - Update customer
-router.put('/:id', authMiddleware, (req, res) => {
+router.put('/:id', authMiddleware, async (req, res) => {
   try {
     const { name, business_name, phone, whatsapp_number, address, latitude, longitude, customer_type, notes } = req.body;
     const update = db.prepare(`
@@ -217,7 +220,7 @@ router.put('/:id', authMiddleware, (req, res) => {
       WHERE id = ?
     `);
 
-    update.run(
+    await update.run(
       name,
       business_name,
       phone,
@@ -230,7 +233,7 @@ router.put('/:id', authMiddleware, (req, res) => {
       req.params.id
     );
 
-    const updated = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
     res.json({ message: 'Customer updated successfully', customer: updated });
   } catch (err) {
     console.error('Error updating customer:', err);
@@ -239,7 +242,7 @@ router.put('/:id', authMiddleware, (req, res) => {
 });
 
 // POST /api/customers/:id/location - Quick GPS location capture
-router.post('/:id/location', authMiddleware, (req, res) => {
+router.post('/:id/location', authMiddleware, async (req, res) => {
   try {
     const { latitude, longitude, address } = req.body;
     if (!latitude || !longitude) {
@@ -247,14 +250,14 @@ router.post('/:id/location', authMiddleware, (req, res) => {
     }
 
     if (address) {
-      db.prepare('UPDATE customers SET latitude = ?, longitude = ?, address = ? WHERE id = ?')
+      await db.prepare('UPDATE customers SET latitude = ?, longitude = ?, address = ? WHERE id = ?')
         .run(parseFloat(latitude), parseFloat(longitude), address, req.params.id);
     } else {
-      db.prepare('UPDATE customers SET latitude = ?, longitude = ? WHERE id = ?')
+      await db.prepare('UPDATE customers SET latitude = ?, longitude = ? WHERE id = ?')
         .run(parseFloat(latitude), parseFloat(longitude), req.params.id);
     }
 
-    const updated = db.prepare('SELECT id, name, business_name, latitude, longitude, address FROM customers WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT id, name, business_name, latitude, longitude, address FROM customers WHERE id = ?').get(req.params.id);
     res.json({ message: 'Customer GPS location saved successfully', customer: updated });
   } catch (err) {
     res.status(500).json({ error: 'Error updating customer GPS location' });
@@ -262,9 +265,9 @@ router.post('/:id/location', authMiddleware, (req, res) => {
 });
 
 // DELETE /api/customers/:id
-router.delete('/:id', authMiddleware, (req, res) => {
+router.delete('/:id', authMiddleware, async (req, res) => {
   try {
-    db.prepare('DELETE FROM customers WHERE id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM customers WHERE id = ?').run(req.params.id);
     res.json({ message: 'Customer removed successfully' });
   } catch (err) {
     res.status(500).json({ error: 'Error deleting customer' });

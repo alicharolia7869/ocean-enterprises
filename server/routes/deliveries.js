@@ -5,47 +5,50 @@ const { authMiddleware } = require('../middleware/auth');
 const router = express.Router();
 
 // GET /api/deliveries - Today's deliveries & route stops
-router.get('/', authMiddleware, (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   try {
-    const store = db._getStore();
-    const { status, date } = req.query;
-    const targetDate = date || new Date().toISOString().slice(0, 10);
+    const { status } = req.query;
 
-    let list = [...store.deliveries];
+    let query = `
+      SELECT d.*, 
+             c.name as customer_name, c.business_name, c.phone as customer_phone, 
+             c.whatsapp_number as customer_whatsapp,
+             o.order_number, o.total_amount, o.paid_amount, o.payment_status, o.order_date, o.special_instructions
+      FROM deliveries d
+      JOIN customers c ON d.customer_id = c.id
+      JOIN orders o ON d.order_id = o.id
+      WHERE 1=1
+    `;
+    const params = [];
 
-    // Enrich deliveries with Customer and Order
-    const enriched = list.map(d => {
-      const c = store.customers.find(cust => cust.id === d.customer_id) || {};
-      const o = store.orders.find(ord => ord.id === d.order_id) || {};
-      const items = store.order_items.filter(oi => oi.order_id === d.order_id);
-
-      return {
-        ...d,
-        customer_name: c.name || '',
-        business_name: c.business_name || '',
-        customer_phone: c.phone || '',
-        customer_whatsapp: c.whatsapp_number || c.phone || '',
-        order_number: o.order_number || '',
-        total_amount: o.total_amount || 0,
-        paid_amount: o.paid_amount || 0,
-        payment_status: o.payment_status || 'Pending',
-        order_date: o.order_date || d.created_at,
-        order_items: items,
-        special_instructions: o.special_instructions || d.driver_notes || '',
-        has_coordinates: !!(d.latitude && d.longitude)
-      };
-    });
-
-    // Filter by status if provided
-    let filtered = enriched;
     if (status && status !== 'All') {
-      filtered = filtered.filter(d => d.status === status);
+      query += ` AND d.status = ?`;
+      params.push(status);
     }
 
-    // Sort by route_sequence (Delivery 1 -> Delivery 2 -> Delivery 3...)
-    filtered.sort((a, b) => (a.route_sequence || 0) - (b.route_sequence || 0));
+    query += ` ORDER BY d.route_sequence ASC, d.created_at ASC`;
 
-    res.json({ deliveries: filtered });
+    const deliveries = await db.prepare(query).all(...params);
+
+    const enriched = [];
+    for (const d of deliveries || []) {
+      const items = await db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(d.order_id);
+      enriched.push({
+        ...d,
+        total_amount: parseFloat(d.total_amount) || 0,
+        paid_amount: parseFloat(d.paid_amount) || 0,
+        latitude: d.latitude ? parseFloat(d.latitude) : null,
+        longitude: d.longitude ? parseFloat(d.longitude) : null,
+        has_coordinates: Boolean(d.latitude && d.longitude),
+        order_items: (items || []).map(it => ({
+          ...it,
+          price: parseFloat(it.price) || 0,
+          subtotal: parseFloat(it.subtotal) || 0
+        }))
+      });
+    }
+
+    res.json({ deliveries: enriched });
   } catch (err) {
     console.error('Error fetching deliveries:', err);
     res.status(500).json({ error: 'Error fetching deliveries' });
@@ -53,54 +56,52 @@ router.get('/', authMiddleware, (req, res) => {
 });
 
 // PUT /api/deliveries/reorder - Optimize or update route sequence order
-router.put('/reorder', authMiddleware, (req, res) => {
+router.put('/reorder', authMiddleware, async (req, res) => {
   try {
     const { sequences } = req.body; // array of { id, route_sequence }
     if (!Array.isArray(sequences)) {
       return res.status(400).json({ error: 'Sequences array required' });
     }
 
-    const store = db._getStore();
     for (const item of sequences) {
-      const deliv = store.deliveries.find(d => d.id === Number(item.id));
-      if (deliv) {
-        deliv.route_sequence = Number(item.route_sequence);
+      if (item && item.id) {
+        await db.prepare('UPDATE deliveries SET route_sequence = ? WHERE id = ?')
+          .run(parseInt(item.route_sequence, 10) || 0, item.id);
       }
     }
-    db._save();
 
     res.json({ message: 'Delivery route updated successfully' });
   } catch (err) {
+    console.error('Error reordering deliveries:', err);
     res.status(500).json({ error: 'Error reordering deliveries' });
   }
 });
 
 // PUT /api/deliveries/:id/status - Update single delivery status
-router.put('/:id/status', authMiddleware, (req, res) => {
+router.put('/:id/status', authMiddleware, async (req, res) => {
   try {
     const { status, driver_notes } = req.body;
-    const store = db._getStore();
-    const deliv = store.deliveries.find(d => d.id === Number(req.params.id));
+    const deliv = await db.prepare('SELECT * FROM deliveries WHERE id = ?').get(req.params.id);
     if (!deliv) {
       return res.status(404).json({ error: 'Delivery not found' });
     }
 
-    deliv.status = status;
-    if (driver_notes) deliv.driver_notes = driver_notes;
     if (status === 'Delivered') {
-      deliv.delivered_at = new Date().toISOString();
+      await db.prepare("UPDATE deliveries SET status = ?, driver_notes = COALESCE(?, driver_notes), delivered_at = datetime('now') WHERE id = ?")
+        .run(status, driver_notes || null, req.params.id);
+    } else {
+      await db.prepare('UPDATE deliveries SET status = ?, driver_notes = COALESCE(?, driver_notes) WHERE id = ?')
+        .run(status, driver_notes || null, req.params.id);
     }
 
     // Sync status to associated order
-    const ord = store.orders.find(o => o.id === deliv.order_id);
-    if (ord) {
-      ord.delivery_status = status;
-    }
+    await db.prepare('UPDATE orders SET delivery_status = ? WHERE id = ?')
+      .run(status, deliv.order_id);
 
-    db._save();
-
-    res.json({ message: `Delivery updated to ${status}`, delivery: deliv });
+    const updated = await db.prepare('SELECT * FROM deliveries WHERE id = ?').get(req.params.id);
+    res.json({ message: `Delivery updated to ${status}`, delivery: updated });
   } catch (err) {
+    console.error('Error updating delivery status:', err);
     res.status(500).json({ error: 'Error updating delivery status' });
   }
 });

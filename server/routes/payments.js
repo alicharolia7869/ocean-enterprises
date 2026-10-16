@@ -5,59 +5,65 @@ const { authMiddleware } = require('../middleware/auth');
 const router = express.Router();
 
 // GET /api/payments - Payment history & pending ledgers
-router.get('/', authMiddleware, (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   try {
-    const store = db._getStore();
-    const { mode, status, customerId } = req.query;
+    const { mode, customerId } = req.query;
 
-    let list = [...store.payments];
+    let query = `
+      SELECT p.*, c.name as customer_name, c.business_name, c.phone as customer_phone, o.order_number
+      FROM payments p
+      JOIN customers c ON p.customer_id = c.id
+      LEFT JOIN orders o ON p.order_id = o.id
+      WHERE 1=1
+    `;
+    const params = [];
 
     if (customerId) {
-      list = list.filter(p => p.customer_id === Number(customerId));
+      query += ` AND p.customer_id = ?`;
+      params.push(parseInt(customerId, 10));
     }
 
     if (mode && mode !== 'All') {
-      list = list.filter(p => p.payment_mode === mode);
+      query += ` AND p.payment_mode = ?`;
+      params.push(mode);
     }
 
-    // Enrich with Customer & Order
-    const enriched = list.map(p => {
-      const c = store.customers.find(cust => cust.id === p.customer_id) || {};
-      const o = p.order_id ? store.orders.find(ord => ord.id === p.order_id) : null;
-      return {
-        ...p,
-        customer_name: c.name || '',
-        business_name: c.business_name || '',
-        customer_phone: c.phone || '',
-        order_number: o ? o.order_number : null
-      };
-    });
+    query += ` ORDER BY p.payment_date DESC`;
 
-    enriched.sort((a, b) => (b.payment_date || b.created_at || '').localeCompare(a.payment_date || a.created_at || ''));
+    const payments = await db.prepare(query).all(...params);
 
     // Outstanding balances list for reminder sending
-    const pendingCustomers = store.customers.map(c => {
-      const orderPending = store.orders
-        .filter(o => o.customer_id === c.id && o.payment_status !== 'Paid')
-        .reduce((acc, o) => acc + Math.max(0, (o.total_amount || 0) - (o.paid_amount || 0)), 0);
-      const waterPending = store.water_entries
-        .filter(w => w.customer_id === c.id && w.payment_status === 'Pending')
-        .reduce((acc, w) => acc + (w.total_amount || 0), 0);
-      const totalPending = orderPending + waterPending;
+    const customers = await db.prepare(`
+      SELECT c.id as customer_id, c.name as customer_name, c.business_name, c.phone, c.whatsapp_number,
+        (
+          COALESCE((SELECT SUM(o.total_amount - o.paid_amount) FROM orders o WHERE o.customer_id = c.id AND o.payment_status != 'Paid' AND o.delivery_status != 'Cancelled'), 0) +
+          COALESCE((SELECT SUM(w.total_amount) FROM water_entries w WHERE w.customer_id = c.id AND w.payment_status = 'Pending'), 0)
+        ) as total_pending
+      FROM customers c
+      ORDER BY c.business_name ASC
+    `).all();
 
-      return {
-        customer_id: c.id,
-        customer_name: c.name,
-        business_name: c.business_name,
-        phone: c.phone,
-        whatsapp_number: c.whatsapp_number || c.phone,
-        totalPending: Math.round(totalPending),
-        hasPending: totalPending > 0
-      };
-    }).filter(c => c.hasPending).sort((a, b) => b.totalPending - a.totalPending);
+    const pendingCustomers = (customers || [])
+      .map(c => {
+        const totalPending = Math.round(parseFloat(c.total_pending) || 0);
+        return {
+          customer_id: c.customer_id,
+          customer_name: c.customer_name,
+          business_name: c.business_name,
+          phone: c.phone,
+          whatsapp_number: c.whatsapp_number || c.phone,
+          totalPending,
+          hasPending: totalPending > 0
+        };
+      })
+      .filter(c => c.hasPending)
+      .sort((a, b) => b.totalPending - a.totalPending);
 
     res.json({
-      payments: enriched,
+      payments: (payments || []).map(p => ({
+        ...p,
+        amount: parseFloat(p.amount) || 0
+      })),
       pendingCustomers
     });
   } catch (err) {
@@ -67,15 +73,14 @@ router.get('/', authMiddleware, (req, res) => {
 });
 
 // POST /api/payments - Record standalone payment
-router.post('/', authMiddleware, (req, res) => {
+router.post('/', authMiddleware, async (req, res) => {
   try {
     const { customer_id, order_id, amount, payment_mode, notes } = req.body;
     if (!customer_id || !amount || parseFloat(amount) <= 0) {
       return res.status(400).json({ error: 'Customer and valid payment amount are required' });
     }
 
-    const store = db._getStore();
-    const customer = store.customers.find(c => c.id === Number(customer_id));
+    const customer = await db.prepare('SELECT * FROM customers WHERE id = ?').get(customer_id);
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' });
     }
@@ -88,53 +93,74 @@ router.post('/', authMiddleware, (req, res) => {
       INSERT INTO payments (customer_id, order_id, water_entry_id, amount, payment_mode, notes)
       VALUES (?, ?, NULL, ?, ?, ?)
     `);
-    const result = insert.run(customer.id, order_id ? Number(order_id) : null, payAmount, mode, notes || '');
+    const result = await insert.run(customer.id, order_id ? Number(order_id) : null, payAmount, mode, notes || '');
 
-    // If order_id specified, update order paid_amount
+    // If specific order_id specified, update order paid_amount
     if (order_id) {
-      const order = store.orders.find(o => o.id === Number(order_id));
+      const order = await db.prepare('SELECT * FROM orders WHERE id = ?').get(order_id);
       if (order) {
-        const newPaid = Math.min(order.total_amount, (order.paid_amount || 0) + payAmount);
-        const newStatus = newPaid >= order.total_amount ? 'Paid' : 'Partial';
-        db.prepare('UPDATE orders SET payment_status = ?, paid_amount = ? WHERE id = ?')
+        const orderTotal = parseFloat(order.total_amount) || 0;
+        const currentPaid = parseFloat(order.paid_amount) || 0;
+        const newPaid = Math.min(orderTotal, currentPaid + payAmount);
+        const newStatus = newPaid >= orderTotal ? 'Paid' : 'Partial';
+        await db.prepare('UPDATE orders SET payment_status = ?, paid_amount = ? WHERE id = ?')
           .run(newStatus, newPaid, order.id);
       }
     } else {
-      // Auto settle oldest pending orders / water entries
+      // Auto settle oldest pending orders first via SQL
       let remaining = payAmount;
-      const unpaidOrders = store.orders
-        .filter(o => o.customer_id === customer.id && o.payment_status !== 'Paid')
-        .sort((a, b) => (a.order_date || '').localeCompare(b.order_date || ''));
+      const unpaidOrders = await db.prepare(`
+        SELECT id, total_amount, paid_amount 
+        FROM orders 
+        WHERE customer_id = ? AND payment_status != 'Paid' AND delivery_status != 'Cancelled'
+        ORDER BY order_date ASC
+      `).all(customer.id);
 
-      for (const o of unpaidOrders) {
+      for (const o of unpaidOrders || []) {
         if (remaining <= 0) break;
-        const due = o.total_amount - (o.paid_amount || 0);
+        const total = parseFloat(o.total_amount) || 0;
+        const currentPaid = parseFloat(o.paid_amount) || 0;
+        const due = total - currentPaid;
         const paying = Math.min(due, remaining);
-        const updatedPaid = (o.paid_amount || 0) + paying;
-        o.paid_amount = updatedPaid;
-        o.payment_status = updatedPaid >= o.total_amount ? 'Paid' : 'Partial';
+        const updatedPaid = currentPaid + paying;
+        const newStatus = updatedPaid >= total ? 'Paid' : 'Partial';
+
+        await db.prepare('UPDATE orders SET payment_status = ?, paid_amount = ? WHERE id = ?')
+          .run(newStatus, updatedPaid, o.id);
+
         remaining -= paying;
       }
 
+      // If still remaining, settle oldest pending water entries via SQL
       if (remaining > 0) {
-        const unpaidWater = store.water_entries
-          .filter(w => w.customer_id === customer.id && w.payment_status === 'Pending')
-          .sort((a, b) => a.date.localeCompare(b.date));
+        const unpaidWater = await db.prepare(`
+          SELECT id, total_amount 
+          FROM water_entries 
+          WHERE customer_id = ? AND payment_status = 'Pending'
+          ORDER BY date ASC
+        `).all(customer.id);
 
-        for (const w of unpaidWater) {
+        for (const w of unpaidWater || []) {
           if (remaining <= 0) break;
-          if (remaining >= w.total_amount) {
-            w.payment_status = 'Paid';
-            remaining -= w.total_amount;
+          const wTotal = parseFloat(w.total_amount) || 0;
+          if (remaining >= wTotal) {
+            await db.prepare("UPDATE water_entries SET payment_status = 'Paid' WHERE id = ?")
+              .run(w.id);
+            remaining -= wTotal;
           }
         }
       }
-      db._save();
     }
 
     res.status(201).json({
       message: 'Payment recorded successfully',
       paymentId: result.lastInsertRowid,
+      payment: {
+        id: result.lastInsertRowid,
+        customer_id: customer.id,
+        amount: payAmount,
+        payment_mode: mode
+      },
       amount: payAmount,
       mode
     });

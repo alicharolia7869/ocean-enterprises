@@ -5,7 +5,7 @@ const { authMiddleware } = require('../middleware/auth');
 const router = express.Router();
 
 // GET /api/water - List water entries with filters
-router.get('/', authMiddleware, (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   try {
     const { date, customerId, month } = req.query;
     let query = `
@@ -35,8 +35,28 @@ router.get('/', authMiddleware, (req, res) => {
 
     query += ` ORDER BY w.date DESC, w.created_at DESC`;
 
-    const entries = db.prepare(query).all(...params);
-    res.json({ entries });
+    const entries = await db.prepare(query).all(...params);
+    const formatted = (entries || []).map(e => ({
+      ...e,
+      quantity: parseInt(e.quantity, 10) || 0,
+      price: parseFloat(e.price) || 0,
+      total_amount: parseFloat(e.total_amount) || 0
+    }));
+
+    const todayStats = await db.prepare(`
+      SELECT 
+        COALESCE(SUM(quantity), 0) as total_units,
+        COALESCE(SUM(total_amount), 0) as total_amount,
+        COUNT(DISTINCT customer_id) as total_customers_served
+      FROM water_entries
+      WHERE date = date('now')
+    `).get();
+
+    res.json({
+      entries: formatted,
+      today_stats: todayStats || {},
+      todayStats: todayStats || {}
+    });
   } catch (err) {
     console.error('Error fetching water entries:', err);
     res.status(500).json({ error: 'Error fetching water entries' });
@@ -44,12 +64,12 @@ router.get('/', authMiddleware, (req, res) => {
 });
 
 // GET /api/water/summary - Today's Water metrics & Customer Monthly Water Summary
-router.get('/summary', authMiddleware, (req, res) => {
+router.get('/summary', authMiddleware, async (req, res) => {
   try {
     const selectedMonth = req.query.month || new Date().toISOString().slice(0, 7); // YYYY-MM
 
     // Today's total water distributed (jars)
-    const todayStats = db.prepare(`
+    const todayStats = await db.prepare(`
       SELECT 
         COALESCE(SUM(quantity), 0) as total_units,
         COALESCE(SUM(total_amount), 0) as total_amount,
@@ -59,7 +79,7 @@ router.get('/summary', authMiddleware, (req, res) => {
     `).get();
 
     // Customer Monthly Water Summary
-    const monthlySummary = db.prepare(`
+    const monthlySummary = await db.prepare(`
       SELECT 
         c.id as customer_id,
         c.name as customer_name,
@@ -75,18 +95,24 @@ router.get('/summary', authMiddleware, (req, res) => {
       FROM customers c
       JOIN water_entries w ON c.id = w.customer_id
       WHERE strftime('%Y-%m', w.date) = ?
-      GROUP BY c.id
+      GROUP BY c.id, c.name, c.business_name, c.phone, c.address
       ORDER BY total_water_units DESC
     `).all(selectedMonth);
 
     res.json({
       selectedMonth,
       todayStats: {
-        totalUnits: todayStats.total_units,
-        totalAmount: Math.round(todayStats.total_amount),
-        customersServed: todayStats.total_customers_served
+        totalUnits: parseInt(todayStats?.total_units || 0, 10),
+        totalAmount: Math.round(parseFloat(todayStats?.total_amount || 0)),
+        customersServed: parseInt(todayStats?.total_customers_served || 0, 10)
       },
-      monthlySummary
+      monthlySummary: (monthlySummary || []).map(m => ({
+        ...m,
+        total_water_units: parseInt(m.total_water_units, 10) || 0,
+        total_amount: Math.round(parseFloat(m.total_amount) || 0),
+        paid_amount: Math.round(parseFloat(m.paid_amount) || 0),
+        pending_amount: Math.round(parseFloat(m.pending_amount) || 0)
+      }))
     });
   } catch (err) {
     console.error('Error fetching water summary:', err);
@@ -95,7 +121,7 @@ router.get('/summary', authMiddleware, (req, res) => {
 });
 
 // POST /api/water - Rapid Water Entry (Ultra-fast 10-20 sec workflow)
-router.post('/', authMiddleware, (req, res) => {
+router.post('/', authMiddleware, async (req, res) => {
   try {
     const { customer_id, product_id, quantity, price, payment_status, date, time, notes, payment_mode } = req.body;
     if (!customer_id || !quantity || quantity <= 0) {
@@ -103,15 +129,15 @@ router.post('/', authMiddleware, (req, res) => {
     }
 
     // Default product if not provided: 20L Water Jar
-    let prodId = product_id;
-    let unitPrice = price;
+    let prodId = product_id ? parseInt(product_id, 10) : null;
+    let unitPrice = price !== undefined && price !== null ? parseFloat(price) : null;
 
     if (!prodId) {
-      const defaultWater = db.prepare("SELECT id, selling_price FROM products WHERE category = 'Water' AND name LIKE '%20L%' LIMIT 1").get();
+      const defaultWater = await db.prepare("SELECT id, selling_price FROM products WHERE category = 'Water' AND name LIKE '%20L%' LIMIT 1").get();
       if (defaultWater) {
         prodId = defaultWater.id;
-        if (unitPrice === undefined || unitPrice === null) {
-          unitPrice = defaultWater.selling_price;
+        if (unitPrice === null || isNaN(unitPrice)) {
+          unitPrice = parseFloat(defaultWater.selling_price);
         }
       } else {
         unitPrice = unitPrice || 35;
@@ -131,8 +157,8 @@ router.post('/', authMiddleware, (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const result = insert.run(
-      customer_id,
+    const result = await insert.run(
+      parseInt(customer_id, 10),
       prodId,
       qty,
       itemPrice,
@@ -147,19 +173,19 @@ router.post('/', authMiddleware, (req, res) => {
 
     // Auto deduct inventory
     if (prodId) {
-      db.prepare('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?').run(qty, prodId);
+      await db.prepare('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?').run(qty, prodId);
     }
 
     // If marked Paid, auto record payment
     if (status === 'Paid') {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO payments (customer_id, order_id, water_entry_id, amount, payment_mode, payment_date, status, notes)
         VALUES (?, NULL, ?, ?, ?, datetime('now'), 'Completed', ?)
-      `).run(customer_id, waterEntryId, totalAmount, payment_mode || 'Cash', `Rapid Water Entry #${waterEntryId}`);
+      `).run(parseInt(customer_id, 10), waterEntryId, totalAmount, payment_mode || 'Cash', `Rapid Water Entry #${waterEntryId}`);
     }
 
     // Fetch created entry with details
-    const created = db.prepare(`
+    const created = await db.prepare(`
       SELECT w.*, c.name as customer_name, c.business_name, c.phone as customer_phone, c.address as customer_address
       FROM water_entries w
       JOIN customers c ON w.customer_id = c.id
@@ -167,11 +193,13 @@ router.post('/', authMiddleware, (req, res) => {
     `).get(waterEntryId);
 
     // Compute updated customer pending balance
-    const customerPending = db.prepare(`
+    const customerPendingRes = await db.prepare(`
       SELECT 
-        COALESCE((SELECT SUM(total_amount - paid_amount) FROM orders WHERE customer_id = ? AND payment_status != 'Paid'), 0) +
+        COALESCE((SELECT SUM(total_amount - paid_amount) FROM orders WHERE customer_id = ? AND payment_status != 'Paid' AND delivery_status != 'Cancelled'), 0) +
         COALESCE((SELECT SUM(total_amount) FROM water_entries WHERE customer_id = ? AND payment_status = 'Pending'), 0) as pending
-    `).get(customer_id, customer_id).pending;
+    `).get(customer_id, customer_id);
+
+    const customerPending = parseFloat(customerPendingRes?.pending || 0);
 
     res.status(201).json({
       message: 'Water supply recorded successfully',
@@ -179,32 +207,33 @@ router.post('/', authMiddleware, (req, res) => {
       customerPendingBalance: Math.round(customerPending)
     });
   } catch (err) {
-    console.error('Error creating water entry:', err);
-    res.status(500).json({ error: 'Error saving water entry' });
+    console.error('Error logging water entry:', err);
+    res.status(500).json({ error: 'Error logging water entry' });
   }
 });
 
-// DELETE /api/water/:id
-router.delete('/:id', authMiddleware, (req, res) => {
+// DELETE /api/water/:id - Revert water entry
+router.delete('/:id', authMiddleware, async (req, res) => {
   try {
-    const entry = db.prepare('SELECT * FROM water_entries WHERE id = ?').get(req.params.id);
+    const entry = await db.prepare('SELECT * FROM water_entries WHERE id = ?').get(req.params.id);
     if (!entry) {
-      return res.status(404).json({ error: 'Entry not found' });
+      return res.status(404).json({ error: 'Water entry not found' });
     }
 
-    // Restore product stock
-    if (entry.product_id) {
-      db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(entry.quantity, entry.product_id);
+    // Restore stock if product linked
+    if (entry.product_id && entry.quantity) {
+      await db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(entry.quantity, entry.product_id);
     }
 
-    // Delete associated payment if any
-    db.prepare('DELETE FROM payments WHERE water_entry_id = ?').run(req.params.id);
+    // Remove any associated payment
+    await db.prepare('DELETE FROM payments WHERE water_entry_id = ?').run(req.params.id);
 
-    // Delete entry
-    db.prepare('DELETE FROM water_entries WHERE id = ?').run(req.params.id);
+    // Delete water entry
+    await db.prepare('DELETE FROM water_entries WHERE id = ?').run(req.params.id);
 
-    res.json({ message: 'Water entry deleted and inventory restored' });
+    res.json({ message: 'Water entry removed and stock reverted' });
   } catch (err) {
+    console.error('Error deleting water entry:', err);
     res.status(500).json({ error: 'Error deleting water entry' });
   }
 });

@@ -5,10 +5,12 @@ const { authMiddleware } = require('../middleware/auth');
 const router = express.Router();
 
 // GET /api/reports/sales
-router.get('/sales', authMiddleware, (req, res) => {
+router.get('/sales', authMiddleware, async (req, res) => {
   try {
-    const store = db._getStore();
     const { period } = req.query; // 'daily', 'weekly', 'monthly'
+
+    const orders = await db.prepare("SELECT total_amount, order_date, created_at, delivery_status FROM orders WHERE delivery_status != 'Cancelled'").all();
+    const waterEntries = await db.prepare("SELECT total_amount, quantity, date FROM water_entries").all();
 
     const now = new Date();
     const result = [];
@@ -24,22 +26,25 @@ router.get('/sales', authMiddleware, (req, res) => {
         const startStr = start.toISOString().slice(0, 10);
         const endStr = d.toISOString().slice(0, 10);
 
-        const orderSales = store.orders
+        const orderSales = (orders || [])
           .filter(o => {
-            const date = (o.order_date || o.created_at || '').slice(0, 10);
-            return date >= startStr && date <= endStr && o.delivery_status !== 'Cancelled';
+            const date = (o.order_date ? String(o.order_date) : (o.created_at ? String(o.created_at) : '')).slice(0, 10);
+            return date >= startStr && date <= endStr;
           })
-          .reduce((sum, o) => sum + (o.total_amount || 0), 0);
+          .reduce((sum, o) => sum + (parseFloat(o.total_amount) || 0), 0);
 
-        const waterSales = store.water_entries
-          .filter(w => w.date >= startStr && w.date <= endStr)
-          .reduce((sum, w) => sum + (w.total_amount || 0), 0);
+        const waterSales = (waterEntries || [])
+          .filter(w => {
+            const date = (w.date ? String(w.date) : '').slice(0, 10);
+            return date >= startStr && date <= endStr;
+          })
+          .reduce((sum, w) => sum + (parseFloat(w.total_amount) || 0), 0);
 
         result.push({
           label: weekLabel,
-          orderSales,
-          waterSales,
-          totalSales: orderSales + waterSales
+          orderSales: Math.round(orderSales),
+          waterSales: Math.round(waterSales),
+          totalSales: Math.round(orderSales + waterSales)
         });
       }
     } else if (period === 'monthly') {
@@ -49,20 +54,20 @@ router.get('/sales', authMiddleware, (req, res) => {
         const monthKey = d.toISOString().slice(0, 7);
         const monthLabel = d.toLocaleString('default', { month: 'short', year: 'numeric' });
 
-        const orderSales = store.orders
-          .filter(o => (o.order_date || o.created_at || '').slice(0, 7) === monthKey && o.delivery_status !== 'Cancelled')
-          .reduce((sum, o) => sum + (o.total_amount || 0), 0);
+        const orderSales = (orders || [])
+          .filter(o => (o.order_date ? String(o.order_date) : (o.created_at ? String(o.created_at) : '')).slice(0, 7) === monthKey)
+          .reduce((sum, o) => sum + (parseFloat(o.total_amount) || 0), 0);
 
-        const waterSales = store.water_entries
-          .filter(w => (w.date || '').slice(0, 7) === monthKey)
-          .reduce((sum, w) => sum + (w.total_amount || 0), 0);
+        const waterSales = (waterEntries || [])
+          .filter(w => (w.date ? String(w.date) : '').slice(0, 7) === monthKey)
+          .reduce((sum, w) => sum + (parseFloat(w.total_amount) || 0), 0);
 
         result.push({
           label: monthLabel,
           monthKey,
-          orderSales,
-          waterSales,
-          totalSales: orderSales + waterSales
+          orderSales: Math.round(orderSales),
+          waterSales: Math.round(waterSales),
+          totalSales: Math.round(orderSales + waterSales)
         });
       }
     } else {
@@ -73,24 +78,20 @@ router.get('/sales', authMiddleware, (req, res) => {
         const dateStr = d.toISOString().slice(0, 10);
         const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-        const orderSales = store.orders
-          .filter(o => (o.order_date || o.created_at || '').slice(0, 10) === dateStr && o.delivery_status !== 'Cancelled')
-          .reduce((sum, o) => sum + (o.total_amount || 0), 0);
+        const orderSales = (orders || [])
+          .filter(o => (o.order_date ? String(o.order_date) : (o.created_at ? String(o.created_at) : '')).slice(0, 10) === dateStr)
+          .reduce((sum, o) => sum + (parseFloat(o.total_amount) || 0), 0);
 
-        const waterSales = store.water_entries
-          .filter(w => w.date === dateStr)
-          .reduce((sum, w) => sum + (w.total_amount || 0), 0);
-
-        const waterUnits = store.water_entries
-          .filter(w => w.date === dateStr)
-          .reduce((sum, w) => sum + (w.quantity || 0), 0);
+        const dailyWater = (waterEntries || []).filter(w => (w.date ? String(w.date) : '').slice(0, 10) === dateStr);
+        const waterSales = dailyWater.reduce((sum, w) => sum + (parseFloat(w.total_amount) || 0), 0);
+        const waterUnits = dailyWater.reduce((sum, w) => sum + (parseInt(w.quantity, 10) || 0), 0);
 
         result.push({
           date: dateStr,
           label,
-          orderSales,
-          waterSales,
-          totalSales: orderSales + waterSales,
+          orderSales: Math.round(orderSales),
+          waterSales: Math.round(waterSales),
+          totalSales: Math.round(orderSales + waterSales),
           waterUnits
         });
       }
@@ -104,32 +105,33 @@ router.get('/sales', authMiddleware, (req, res) => {
 });
 
 // GET /api/reports/customer-wise
-router.get('/customer-wise', authMiddleware, (req, res) => {
+router.get('/customer-wise', authMiddleware, async (req, res) => {
   try {
-    const store = db._getStore();
-    const data = store.customers.map(c => {
-      const orders = store.orders.filter(o => o.customer_id === c.id && o.delivery_status !== 'Cancelled');
-      const water = store.water_entries.filter(w => w.customer_id === c.id);
+    const customers = await db.prepare('SELECT id, name, business_name, phone FROM customers ORDER BY business_name ASC').all();
+    const allOrders = await db.prepare("SELECT customer_id, total_amount, paid_amount FROM orders WHERE delivery_status != 'Cancelled'").all();
+    const allWater = await db.prepare("SELECT customer_id, quantity, total_amount, payment_status FROM water_entries").all();
 
-      const orderSales = orders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
-      const waterSales = water.reduce((sum, w) => sum + (w.total_amount || 0), 0);
-      const totalWaterUnits = water.reduce((sum, w) => sum + (w.quantity || 0), 0);
+    const data = (customers || []).map(c => {
+      const orders = (allOrders || []).filter(o => o.customer_id === c.id);
+      const water = (allWater || []).filter(w => w.customer_id === c.id);
+
+      const orderSales = orders.reduce((sum, o) => sum + (parseFloat(o.total_amount) || 0), 0);
+      const waterSales = water.reduce((sum, w) => sum + (parseFloat(w.total_amount) || 0), 0);
+      const totalWaterUnits = water.reduce((sum, w) => sum + (parseInt(w.quantity, 10) || 0), 0);
       const totalSales = orderSales + waterSales;
 
-      const orderPaid = orders.reduce((sum, o) => sum + (o.paid_amount || 0), 0);
-      const waterPaid = water.filter(w => w.payment_status === 'Paid').reduce((sum, w) => sum + (w.total_amount || 0), 0);
+      const orderPaid = orders.reduce((sum, o) => sum + (parseFloat(o.paid_amount) || 0), 0);
+      const waterPaid = water.filter(w => w.payment_status === 'Paid').reduce((sum, w) => sum + (parseFloat(w.total_amount) || 0), 0);
       const totalPaid = orderPaid + waterPaid;
-
       const pending = Math.max(0, totalSales - totalPaid);
 
       return {
-        id: c.id,
+        customer_id: c.id,
         name: c.name,
         business_name: c.business_name,
-        customer_type: c.customer_type,
         phone: c.phone,
-        orders_count: orders.length,
-        water_units: totalWaterUnits,
+        total_orders: orders.length,
+        total_water_units: totalWaterUnits,
         total_sales: Math.round(totalSales),
         total_paid: Math.round(totalPaid),
         total_pending: Math.round(pending)
@@ -138,40 +140,47 @@ router.get('/customer-wise', authMiddleware, (req, res) => {
 
     res.json({ customerWise: data });
   } catch (err) {
+    console.error('Error generating customer-wise report:', err);
     res.status(500).json({ error: 'Error generating customer-wise report' });
   }
 });
 
 // GET /api/reports/product-wise
-router.get('/product-wise', authMiddleware, (req, res) => {
+router.get('/product-wise', authMiddleware, async (req, res) => {
   try {
-    const store = db._getStore();
-    const data = store.products.map(p => {
+    const products = await db.prepare('SELECT * FROM products ORDER BY name ASC').all();
+    const orderItems = await db.prepare(`
+      SELECT oi.product_id, oi.quantity, oi.subtotal 
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      WHERE o.delivery_status != 'Cancelled'
+    `).all();
+    const waterEntries = await db.prepare('SELECT product_id, quantity, total_amount FROM water_entries').all();
+
+    const data = (products || []).map(p => {
       let unitsSold = 0;
       let revenue = 0;
 
       // From order items
-      store.order_items.forEach(oi => {
+      (orderItems || []).forEach(oi => {
         if (oi.product_id === p.id) {
-          const ord = store.orders.find(o => o.id === oi.order_id);
-          if (ord && ord.delivery_status !== 'Cancelled') {
-            unitsSold += oi.quantity || 0;
-            revenue += oi.subtotal || 0;
-          }
+          unitsSold += parseInt(oi.quantity, 10) || 0;
+          revenue += parseFloat(oi.subtotal) || 0;
         }
       });
 
       // From water entries if water jar
       if (p.category === 'Water') {
-        store.water_entries.forEach(w => {
-          if (w.product_id === p.id || (!w.product_id && p.name.includes('20L'))) {
-            unitsSold += w.quantity || 0;
-            revenue += w.total_amount || 0;
+        (waterEntries || []).forEach(w => {
+          if (w.product_id === p.id || (!w.product_id && (p.name || '').includes('20L'))) {
+            unitsSold += parseInt(w.quantity, 10) || 0;
+            revenue += parseFloat(w.total_amount) || 0;
           }
         });
       }
 
-      const estimatedCost = unitsSold * (p.purchase_price || 0);
+      const purchasePrice = parseFloat(p.purchase_price) || 0;
+      const estimatedCost = unitsSold * purchasePrice;
       const estimatedProfit = Math.max(0, revenue - estimatedCost);
 
       return {
@@ -179,9 +188,9 @@ router.get('/product-wise', authMiddleware, (req, res) => {
         name: p.name,
         category: p.category,
         size: p.size,
-        stock: p.stock,
-        selling_price: p.selling_price,
-        purchase_price: p.purchase_price,
+        stock: parseInt(p.stock, 10) || 0,
+        selling_price: parseFloat(p.selling_price) || 0,
+        purchase_price: purchasePrice,
         units_sold: unitsSold,
         revenue: Math.round(revenue),
         profit: Math.round(estimatedProfit)
@@ -190,6 +199,7 @@ router.get('/product-wise', authMiddleware, (req, res) => {
 
     res.json({ productWise: data });
   } catch (err) {
+    console.error('Error generating product-wise report:', err);
     res.status(500).json({ error: 'Error generating product-wise report' });
   }
 });

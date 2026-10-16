@@ -21,25 +21,45 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// API Route Handlers
-app.use('/api/auth', authRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/customers', customerRoutes);
-app.use('/api/products', productRoutes);
-app.use('/api/orders', orderRoutes);
-app.use('/api/water', waterRoutes);
-app.use('/api/deliveries', deliveryRoutes);
-app.use('/api/payments', paymentRoutes);
-app.use('/api/reports', reportRoutes);
-app.use('/api/settings', settingRoutes);
+// Route mapping - mounts on both /api/... and /... to support all Vercel rewrite patterns
+const routeModules = [
+  ['/auth', authRoutes],
+  ['/dashboard', dashboardRoutes],
+  ['/customers', customerRoutes],
+  ['/products', productRoutes],
+  ['/orders', orderRoutes],
+  ['/water', waterRoutes],
+  ['/deliveries', deliveryRoutes],
+  ['/payments', paymentRoutes],
+  ['/reports', reportRoutes],
+  ['/settings', settingRoutes]
+];
+
+routeModules.forEach(([mountPath, router]) => {
+  app.use(`/api${mountPath}`, router);
+  app.use(mountPath, router);
+});
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
+const healthHandler = (req, res) => {
   res.json({
     status: 'online',
     system: 'Ocean Enterprises Business Management System API (Vercel Serverless)',
     timestamp: new Date().toISOString()
   });
+};
+
+app.get('/api/health', healthHandler);
+app.get('/health', healthHandler);
+
+// 404 JSON handler for unknown API endpoints (Express 5 compatible)
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'API endpoint not found', path: req.originalUrl || req.path });
+});
+
+app.use((req, res) => {
+  res.status(404).json({ error: 'Endpoint not found', path: req.originalUrl || req.path });
 });
 
 module.exports = app;
+
