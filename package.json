@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server/index.js",
     "seed": "node server/db/seed.js",
-    "build": "npm run build --prefix client",
+    "build": "npm --prefix client install && npm run build --prefix client",
     "dev:client": "npm run dev --prefix client",
     "test": "node server/db/seed.js"
   },

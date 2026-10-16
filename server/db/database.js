@@ -1,12 +1,48 @@
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+// Determine storage path (supports local development and Vercel serverless environments)
+const IS_SERVERLESS = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const BUNDLED_DATA_FILE = path.join(__dirname, '..', 'data', 'ocean_store.json');
+
+// Static require ensures @vercel/nft traces and bundles the JSON file into the lambda
+let initialBundledStore = null;
+try {
+  initialBundledStore = require('../data/ocean_store.json');
+} catch (e) {
+  // Ignored if file doesn't exist yet
 }
 
-const DATA_FILE = path.join(DATA_DIR, 'ocean_store.json');
+let DATA_DIR;
+let DATA_FILE;
+
+if (IS_SERVERLESS) {
+  DATA_DIR = '/tmp';
+  DATA_FILE = path.join(DATA_DIR, 'ocean_store.json');
+  if (!fs.existsSync(DATA_FILE)) {
+    if (initialBundledStore) {
+      try {
+        fs.writeFileSync(DATA_FILE, JSON.stringify(initialBundledStore, null, 2), 'utf8');
+      } catch (err) {
+        console.warn('Could not write initial store to /tmp:', err);
+      }
+    } else if (fs.existsSync(BUNDLED_DATA_FILE)) {
+      try {
+        fs.copyFileSync(BUNDLED_DATA_FILE, DATA_FILE);
+      } catch (err) {
+        console.warn('Could not copy bundled store to /tmp:', err);
+      }
+    }
+  }
+} else {
+  DATA_DIR = path.join(__dirname, '..', 'data');
+  if (!fs.existsSync(DATA_DIR)) {
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    } catch (err) {}
+  }
+  DATA_FILE = path.join(DATA_DIR, 'ocean_store.json');
+}
 
 // Default initial state
 const defaultState = {
@@ -38,13 +74,21 @@ function loadStore() {
     if (fs.existsSync(DATA_FILE)) {
       const data = fs.readFileSync(DATA_FILE, 'utf8');
       store = JSON.parse(data);
-      if (!store.sequences) store.sequences = { ...defaultState.sequences };
+    } else if (initialBundledStore) {
+      store = JSON.parse(JSON.stringify(initialBundledStore));
+      saveStore();
+    } else if (fs.existsSync(BUNDLED_DATA_FILE)) {
+      const data = fs.readFileSync(BUNDLED_DATA_FILE, 'utf8');
+      store = JSON.parse(data);
+      saveStore();
     } else {
+      store = { ...defaultState };
       saveStore();
     }
+    if (!store.sequences) store.sequences = { ...defaultState.sequences };
   } catch (err) {
     console.error('Error loading database store, initializing new:', err);
-    store = { ...defaultState };
+    store = initialBundledStore ? JSON.parse(JSON.stringify(initialBundledStore)) : { ...defaultState };
     saveStore();
   }
 }
