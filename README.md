@@ -1,11 +1,14 @@
 # 🌊 Ocean Enterprises — Business Management System
 ### Water Supply & Beverage Distribution Operations Platform
 
+[![Vercel Deployment](https://img.shields.io/badge/Deployed_on-Vercel-black?style=for-the-badge&logo=vercel)](https://ocean-enterprises.vercel.app)
 [![Node.js](https://img.shields.io/badge/Node.js-v20%2B-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Express](https://img.shields.io/badge/Express-5.x-000000?style=for-the-badge&logo=express&logoColor=white)](https://expressjs.com/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-8.x-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
+
+> 🚀 **Live Production Application**: **[https://ocean-enterprises.vercel.app](https://ocean-enterprises.vercel.app)**
 
 An enterprise-grade, high-velocity operational command center and CRM designed specifically for water supply plants, 20L packaged drinking water vendors, and beverage wholesale distributors.
 
