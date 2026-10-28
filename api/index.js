@@ -8,10 +8,11 @@ if (process.env.NODE_ENV !== 'test') {
     path: [
       path.join(__dirname, '..', '.env.local'),
       path.join(__dirname, '..', '.env')
-    ]
+    ],
+    quiet: true
   });
 } else {
-  dotenv.config();
+  dotenv.config({ quiet: true });
 }
 
 const postgres = require('../server/db/postgres');

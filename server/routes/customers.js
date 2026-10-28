@@ -171,7 +171,18 @@ router.get('/:id', authMiddleware, async (req, res) => {
         payment_status: pendingBalance <= 0 ? 'Paid' : 'Pending'
       },
       orders: parsedOrders,
-      waterEntries: waterEntries || [],
+      waterEntries: (waterEntries || []).map(w => {
+        const totalAmt = parseFloat(w.total_amount) || 0;
+        const paidAmt = w.payment_status === 'Paid' ? totalAmt : Math.min(totalAmt, parseFloat(w.paid_amount) || 0);
+        return {
+          ...w,
+          quantity: parseInt(w.quantity, 10) || 0,
+          price: parseFloat(w.price) || 0,
+          total_amount: totalAmt,
+          paid_amount: paidAmt,
+          remaining_amount: Math.max(0, totalAmt - paidAmt)
+        };
+      }),
       payments: payments || [],
       monthlyStats
     });

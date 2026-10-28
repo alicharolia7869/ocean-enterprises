@@ -9,15 +9,36 @@ const router = express.Router();
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   try {
-    const { emailOrPhone, password } = req.body;
-    if (!emailOrPhone || !password) {
+    const rawIdentifier = req.body.emailOrPhone || req.body.email || req.body.phone || req.body.username;
+    const { password } = req.body;
+    if (!rawIdentifier || !password) {
       return res.status(400).json({ error: 'Email/phone and password are required' });
     }
 
-    const user = await db.prepare(`
+    const identifier = String(rawIdentifier).trim();
+    const lowerIdentifier = identifier.toLowerCase();
+    const inputDigits = identifier.replace(/\D/g, '');
+
+    let user = await db.prepare(`
       SELECT * FROM users 
       WHERE email = ? OR phone = ?
-    `).get(emailOrPhone.trim().toLowerCase(), emailOrPhone.trim());
+    `).get(lowerIdentifier, identifier);
+
+    if (!user) {
+      const allUsers = await db.prepare('SELECT * FROM users').all();
+      user = (allUsers || []).find(u => {
+        if (u.email && u.email.toLowerCase() === lowerIdentifier) return true;
+        if (u.name && u.name.trim().toLowerCase() === lowerIdentifier) return true;
+        if (lowerIdentifier === 'admin' && u.role === 'admin') return true;
+        if (inputDigits.length >= 10 && u.phone) {
+          const userDigits = String(u.phone).replace(/\D/g, '');
+          if (userDigits === inputDigits || userDigits.slice(-10) === inputDigits.slice(-10)) {
+            return true;
+          }
+        }
+        return false;
+      });
+    }
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials. Please check your email/phone.' });

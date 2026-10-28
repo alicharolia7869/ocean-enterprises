@@ -148,11 +148,12 @@ router.get('/stats', authMiddleware, async (req, res) => {
       LIMIT 6
     `).all();
 
-    // 12. Delivery status breakdown
+    // 12. Delivery status breakdown (active dispatch pipeline + today's completed deliveries)
     const deliveryBreakdown = await db.prepare(`
       SELECT delivery_status, COUNT(*) as count
       FROM orders
-      WHERE date(order_date) = date('now')
+      WHERE delivery_status IN ('New Order', 'Confirmed', 'Preparing', 'Out for Delivery')
+         OR date(order_date) = date('now')
       GROUP BY delivery_status
     `).all();
 

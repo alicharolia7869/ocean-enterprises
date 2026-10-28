@@ -36,12 +36,18 @@ router.get('/', authMiddleware, async (req, res) => {
     query += ` ORDER BY w.date DESC, w.created_at DESC`;
 
     const entries = await db.prepare(query).all(...params);
-    const formatted = (entries || []).map(e => ({
-      ...e,
-      quantity: parseInt(e.quantity, 10) || 0,
-      price: parseFloat(e.price) || 0,
-      total_amount: parseFloat(e.total_amount) || 0
-    }));
+    const formatted = (entries || []).map(e => {
+      const totalAmount = parseFloat(e.total_amount) || 0;
+      const paidAmount = e.payment_status === 'Paid' ? totalAmount : Math.min(totalAmount, parseFloat(e.paid_amount) || 0);
+      return {
+        ...e,
+        quantity: parseInt(e.quantity, 10) || 0,
+        price: parseFloat(e.price) || 0,
+        total_amount: totalAmount,
+        paid_amount: paidAmount,
+        remaining_amount: Math.max(0, totalAmount - paidAmount)
+      };
+    });
 
     const todayStats = await db.prepare(`
       SELECT 

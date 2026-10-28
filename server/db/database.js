@@ -1134,10 +1134,13 @@ class Statement {
     // 7. Delivery status breakdown
     if (/SELECT delivery_status, COUNT\(\*\) as count\s+FROM orders/i.test(s)) {
       const today = new Date().toISOString().slice(0, 10);
+      const activeStatuses = new Set(['New Order', 'Confirmed', 'Preparing', 'Out for Delivery']);
       const counts = {};
-      store.orders.filter(o => (o.order_date || '').slice(0, 10) === today).forEach(o => {
-        counts[o.delivery_status] = (counts[o.delivery_status] || 0) + 1;
-      });
+      store.orders
+        .filter(o => activeStatuses.has(o.delivery_status) || (o.order_date || '').slice(0, 10) === today)
+        .forEach(o => {
+          counts[o.delivery_status] = (counts[o.delivery_status] || 0) + 1;
+        });
       return Object.entries(counts).map(([delivery_status, count]) => ({ delivery_status, count }));
     }
 

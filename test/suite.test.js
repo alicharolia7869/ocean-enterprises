@@ -136,6 +136,22 @@ test('2. Authentication & Security', async (t) => {
     authToken = res.data.token;
   });
 
+  await t.test('Admin login succeeds with normalized 10-digit phone number or account name', async () => {
+    const phoneRes = await req('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ emailOrPhone: '9876543210', password: 'admin123' })
+    });
+    assert.equal(phoneRes.status, 200);
+    assert.equal(phoneRes.data.user.email, 'admin@ocean.com');
+
+    const nameRes = await req('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ emailOrPhone: 'Ocean Admin', password: 'admin123' })
+    });
+    assert.equal(nameRes.status, 200);
+    assert.equal(nameRes.data.user.email, 'admin@ocean.com');
+  });
+
   await t.test('Protected endpoint rejects request without token', async () => {
     const res = await req('/api/auth/me', { noAuth: true });
     assert.equal(res.status, 401);

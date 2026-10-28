@@ -19,7 +19,7 @@ export default function Orders({ openNewOrderModal, onCloseNewOrderModal }) {
   const [, setLoading] = useState(true);
 
   // Filters
-  const [timeFilter, setTimeFilter] = useState('Today');
+  const [timeFilter, setTimeFilter] = useState('All');
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [deliveryFilter, setDeliveryFilter] = useState('All');
   const [paymentFilter, setPaymentFilter] = useState('All');
