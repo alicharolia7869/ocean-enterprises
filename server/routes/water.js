@@ -90,10 +90,8 @@ router.get('/summary', authMiddleware, async (req, res) => {
         COALESCE(SUM(w.total_amount), 0) as total_amount,
         COALESCE(SUM(CASE WHEN w.payment_status = 'Paid' THEN w.total_amount ELSE COALESCE(w.paid_amount, 0) END), 0) as paid_amount,
         COALESCE(SUM(CASE WHEN w.payment_status = 'Paid' THEN 0 ELSE (w.total_amount - COALESCE(w.paid_amount, 0)) END), 0) as pending_amount,
-        COUNT(w.id) as delivery_days, /*
         COUNT(w.id) as delivery_days,
-        COUNT(w.id) as delivery_days,
-        */ MAX(w.date) as last_water_date
+        MAX(w.date) as last_water_date
       FROM customers c
       JOIN water_entries w ON c.id = w.customer_id
       WHERE strftime('%Y-%m', w.date) = ?

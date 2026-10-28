@@ -156,7 +156,3 @@ CREATE TABLE IF NOT EXISTS business_settings (
 -- Non-destructive migration for partial water payment tracking on existing databases
 ALTER TABLE water_entries ADD COLUMN IF NOT EXISTS paid_amount NUMERIC(12, 2) NOT NULL DEFAULT 0;
 UPDATE water_entries SET paid_amount = total_amount WHERE payment_status = 'Paid' AND paid_amount = 0;
-CREATE TABLE IF NOT EXISTS business_settings (
-  key VARCHAR(255) PRIMARY KEY,
-  value TEXT
-);

@@ -5,7 +5,8 @@ async function seed() {
   console.log('Seeding Ocean Enterprises database...');
 
   // Check if already seeded
-  const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
+  const userCountRes = await db.prepare('SELECT COUNT(*) as count FROM users').get();
+  const userCount = parseInt(userCountRes?.count || 0, 10);
   if (userCount > 0) {
     console.log('Database already has users. Skipping initial seed.');
     return;
@@ -17,21 +18,21 @@ async function seed() {
     INSERT INTO users (name, phone, email, password_hash, role)
     VALUES (?, ?, ?, ?, ?)
   `);
-  insertUser.run('Ocean Admin', '+91 9876543210', 'admin@ocean.com', passwordHash, 'admin');
+  await insertUser.run('Ocean Admin', '+91 9876543210', 'admin@ocean.com', passwordHash, 'admin');
 
   // 2. Business Settings
   const insertSetting = db.prepare(`
     INSERT OR REPLACE INTO business_settings (key, value)
     VALUES (?, ?)
   `);
-  insertSetting.run('business_name', 'Ocean Enterprises');
-  insertSetting.run('phone', '+91 98765 43210');
-  insertSetting.run('whatsapp', '919876543210');
-  insertSetting.run('email', 'orders@oceanenterprises.com');
-  insertSetting.run('address', 'Muntaha Building, JVLR Road, Jogeshwari (West), Mumbai - 400102');
-  insertSetting.run('upi_id', 'oceanenterprises@okhdfcbank');
-  insertSetting.run('currency', '₹');
-  insertSetting.run('low_stock_threshold', '20');
+  await insertSetting.run('business_name', 'Ocean Enterprises');
+  await insertSetting.run('phone', '+91 98765 43210');
+  await insertSetting.run('whatsapp', '919876543210');
+  await insertSetting.run('email', 'orders@oceanenterprises.com');
+  await insertSetting.run('address', 'Muntaha Building, JVLR Road, Jogeshwari (West), Mumbai - 400102');
+  await insertSetting.run('upi_id', 'oceanenterprises@okhdfcbank');
+  await insertSetting.run('currency', '₹');
+  await insertSetting.run('low_stock_threshold', '20');
 
   // 3. Products
   const products = [
@@ -60,7 +61,7 @@ async function seed() {
 
   const productMap = {};
   for (const p of products) {
-    const res = insertProduct.run(p.name, p.category, p.size, p.selling_price, p.purchase_price, p.stock, p.minimum_stock);
+    const res = await insertProduct.run(p.name, p.category, p.size, p.selling_price, p.purchase_price, p.stock, p.minimum_stock);
     productMap[p.name] = res.lastInsertRowid;
   }
 
@@ -262,33 +263,37 @@ async function seed() {
 
   const customerMap = {};
   for (const c of customers) {
-    const res = insertCustomer.run(c.name, c.business_name, c.phone, c.whatsapp_number, c.address, c.latitude, c.longitude, c.customer_type, c.notes);
+    const res = await insertCustomer.run(c.name, c.business_name, c.phone, c.whatsapp_number, c.address, c.latitude, c.longitude, c.customer_type, c.notes);
     customerMap[c.business_name || c.name] = res.lastInsertRowid;
   }
 
   // 5. Water Entries (Rapid daily water supply records)
   const insertWater = db.prepare(`
     INSERT INTO water_entries (customer_id, product_id, quantity, price, total_amount, payment_status, date, time, notes)
-    VALUES (?, ?, ?, ?, ?, ?, date('now'), time('now'), ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
+
+  const todayDateStr = new Date().toISOString().slice(0, 10);
+  const nowTimeStr = new Date().toTimeString().slice(0, 8);
+  const daysAgoStr = (days) => {
+    const d = new Date();
+    d.setDate(d.getDate() - days);
+    return d.toISOString().slice(0, 10);
+  };
 
   const waterJarId = productMap['20L Water Jar'];
-  insertWater.run(customerMap['ABC Restaurant'], waterJarId, 6, 35, 210, 'Paid', 'Delivered morning 10:30');
-  insertWater.run(customerMap['Star Bakery & Cafe'], waterJarId, 3, 35, 105, 'Paid', 'Delivered 11:15');
-  insertWater.run(customerMap['Ali Grand Hotel'], waterJarId, 15, 35, 525, 'Pending', 'Monthly payment account');
-  insertWater.run(customerMap['Apex Tech Corporate Office'], waterJarId, 8, 35, 280, 'Pending', 'Office supply');
-  insertWater.run(customerMap['Royal Biryani House'], waterJarId, 5, 35, 175, 'Paid', 'Cash collected');
-  insertWater.run(customerMap['Deshmukh Residence'], waterJarId, 2, 35, 70, 'Paid', 'Home delivery');
+  await insertWater.run(customerMap['ABC Restaurant'], waterJarId, 6, 35, 210, 'Paid', todayDateStr, nowTimeStr, 'Delivered morning 10:30');
+  await insertWater.run(customerMap['Star Bakery & Cafe'], waterJarId, 3, 35, 105, 'Paid', todayDateStr, nowTimeStr, 'Delivered 11:15');
+  await insertWater.run(customerMap['Ali Grand Hotel'], waterJarId, 15, 35, 525, 'Pending', todayDateStr, nowTimeStr, 'Monthly payment account');
+  await insertWater.run(customerMap['Apex Tech Corporate Office'], waterJarId, 8, 35, 280, 'Pending', todayDateStr, nowTimeStr, 'Office supply');
+  await insertWater.run(customerMap['Royal Biryani House'], waterJarId, 5, 35, 175, 'Paid', todayDateStr, nowTimeStr, 'Cash collected');
+  await insertWater.run(customerMap['Deshmukh Residence'], waterJarId, 2, 35, 70, 'Paid', todayDateStr, nowTimeStr, 'Home delivery');
 
   // Also add some yesterday/past entries for monthly summary
-  const insertPastWater = db.prepare(`
-    INSERT INTO water_entries (customer_id, product_id, quantity, price, total_amount, payment_status, date, time, notes)
-    VALUES (?, ?, ?, ?, ?, ?, date('now', ?), '11:00:00', ?)
-  `);
-  insertPastWater.run(customerMap['ABC Restaurant'], waterJarId, 8, 35, 280, 'Paid', '-1 day', 'Yesterday supply');
-  insertPastWater.run(customerMap['ABC Restaurant'], waterJarId, 7, 35, 245, 'Paid', '-3 day', 'Regular supply');
-  insertPastWater.run(customerMap['Star Bakery & Cafe'], waterJarId, 4, 35, 140, 'Paid', '-2 day', 'Regular supply');
-  insertPastWater.run(customerMap['Ali Grand Hotel'], waterJarId, 18, 35, 630, 'Pending', '-4 day', 'Bulk supply');
+  await insertWater.run(customerMap['ABC Restaurant'], waterJarId, 8, 35, 280, 'Paid', daysAgoStr(1), '11:00:00', 'Yesterday supply');
+  await insertWater.run(customerMap['ABC Restaurant'], waterJarId, 7, 35, 245, 'Paid', daysAgoStr(3), '11:00:00', 'Regular supply');
+  await insertWater.run(customerMap['Star Bakery & Cafe'], waterJarId, 4, 35, 140, 'Paid', daysAgoStr(2), '11:00:00', 'Regular supply');
+  await insertWater.run(customerMap['Ali Grand Hotel'], waterJarId, 18, 35, 630, 'Pending', daysAgoStr(4), '11:00:00', 'Bulk supply');
 
   // 6. Orders & Order Items
   const insertOrder = db.prepare(`
@@ -307,7 +312,7 @@ async function seed() {
   `);
 
   // Order 1: WhatsApp incoming order for ABC Restaurant
-  const ord1 = insertOrder.run(
+  const ord1 = await insertOrder.run(
     'ORD-2026-001',
     customerMap['ABC Restaurant'],
     490,
@@ -320,14 +325,14 @@ async function seed() {
     'Deliver before lunch crowd at 12 PM',
     'WhatsApp'
   );
-  insertOrderItem.run(ord1.lastInsertRowid, productMap['20L Water Jar'], '20L Water Jar', 4, 35, 140);
-  insertOrderItem.run(ord1.lastInsertRowid, productMap['Thums Up 750 ml'], 'Thums Up 750 ml', 4, 45, 180);
-  insertOrderItem.run(ord1.lastInsertRowid, productMap['Appy Fizz 600 ml'], 'Appy Fizz 600 ml', 3, 40, 120);
-  insertOrderItem.run(ord1.lastInsertRowid, productMap['Frooti 600 ml'], 'Frooti 600 ml', 1, 40, 40);
-  insertDelivery.run(ord1.lastInsertRowid, customerMap['ABC Restaurant'], customers[0].address, customers[0].latitude, customers[0].longitude, 'Delivered', 1, 'Delivered to kitchen manager');
+  await insertOrderItem.run(ord1.lastInsertRowid, productMap['20L Water Jar'], '20L Water Jar', 4, 35, 140);
+  await insertOrderItem.run(ord1.lastInsertRowid, productMap['Thums Up 750 ml'], 'Thums Up 750 ml', 4, 45, 180);
+  await insertOrderItem.run(ord1.lastInsertRowid, productMap['Appy Fizz 600 ml'], 'Appy Fizz 600 ml', 3, 40, 120);
+  await insertOrderItem.run(ord1.lastInsertRowid, productMap['Frooti 600 ml'], 'Frooti 600 ml', 1, 40, 40);
+  await insertDelivery.run(ord1.lastInsertRowid, customerMap['ABC Restaurant'], customers[0].address, customers[0].latitude, customers[0].longitude, 'Delivered', 1, 'Delivered to kitchen manager');
 
   // Order 2: Out for Delivery for Star Bakery & Cafe
-  const ord2 = insertOrder.run(
+  const ord2 = await insertOrder.run(
     'ORD-2026-002',
     customerMap['Star Bakery & Cafe'],
     390,
@@ -340,13 +345,13 @@ async function seed() {
     'Call Sunil Mehta on arrival',
     'WhatsApp'
   );
-  insertOrderItem.run(ord2.lastInsertRowid, productMap['Frooti 1.2 L'], 'Frooti 1.2 L', 3, 70, 210);
-  insertOrderItem.run(ord2.lastInsertRowid, productMap['Appy Fizz 600 ml'], 'Appy Fizz 600 ml', 3, 40, 120);
-  insertOrderItem.run(ord2.lastInsertRowid, productMap['20L Water Jar'], '20L Water Jar', 2, 35, 70);
-  insertDelivery.run(ord2.lastInsertRowid, customerMap['Star Bakery & Cafe'], customers[1].address, customers[1].latitude, customers[1].longitude, 'Out for Delivery', 2, 'On the way in delivery tempo');
+  await insertOrderItem.run(ord2.lastInsertRowid, productMap['Frooti 1.2 L'], 'Frooti 1.2 L', 3, 70, 210);
+  await insertOrderItem.run(ord2.lastInsertRowid, productMap['Appy Fizz 600 ml'], 'Appy Fizz 600 ml', 3, 40, 120);
+  await insertOrderItem.run(ord2.lastInsertRowid, productMap['20L Water Jar'], '20L Water Jar', 2, 35, 70);
+  await insertDelivery.run(ord2.lastInsertRowid, customerMap['Star Bakery & Cafe'], customers[1].address, customers[1].latitude, customers[1].longitude, 'Out for Delivery', 2, 'On the way in delivery tempo');
 
   // Order 3: Preparing for Royal Biryani House
-  const ord3 = insertOrder.run(
+  const ord3 = await insertOrder.run(
     'ORD-2026-003',
     customerMap['Royal Biryani House'],
     575,
@@ -359,14 +364,14 @@ async function seed() {
     'Please send chilled bottles',
     'Manual'
   );
-  insertOrderItem.run(ord3.lastInsertRowid, productMap['Thums Up 750 ml'], 'Thums Up 750 ml', 5, 45, 225);
-  insertOrderItem.run(ord3.lastInsertRowid, productMap['20L Water Jar'], '20L Water Jar', 5, 35, 175);
-  insertOrderItem.run(ord3.lastInsertRowid, productMap['Frooti 300 ml'], 'Frooti 300 ml', 5, 20, 100);
-  insertOrderItem.run(ord3.lastInsertRowid, productMap['Litchi Real Fruit Juice 500 ml'], 'Litchi Real Fruit Juice 500 ml', 2, 35, 75);
-  insertDelivery.run(ord3.lastInsertRowid, customerMap['Royal Biryani House'], customers[4].address, customers[4].latitude, customers[4].longitude, 'Preparing', 3, 'Packing cold drinks crate');
+  await insertOrderItem.run(ord3.lastInsertRowid, productMap['Thums Up 750 ml'], 'Thums Up 750 ml', 5, 45, 225);
+  await insertOrderItem.run(ord3.lastInsertRowid, productMap['20L Water Jar'], '20L Water Jar', 5, 35, 175);
+  await insertOrderItem.run(ord3.lastInsertRowid, productMap['Frooti 300 ml'], 'Frooti 300 ml', 5, 20, 100);
+  await insertOrderItem.run(ord3.lastInsertRowid, productMap['Litchi Real Fruit Juice 500 ml'], 'Litchi Real Fruit Juice 500 ml', 2, 35, 75);
+  await insertDelivery.run(ord3.lastInsertRowid, customerMap['Royal Biryani House'], customers[4].address, customers[4].latitude, customers[4].longitude, 'Preparing', 3, 'Packing cold drinks crate');
 
   // Order 4: New Order for Apex Tech Office
-  const ord4 = insertOrder.run(
+  const ord4 = await insertOrder.run(
     'ORD-2026-004',
     customerMap['Apex Tech Corporate Office'],
     800,
@@ -379,8 +384,8 @@ async function seed() {
     'Leave at Reception security desk',
     'WhatsApp'
   );
-  insertOrderItem.run(ord4.lastInsertRowid, productMap['500ml Water Bottles (Box of 24)'], '500ml Water Bottles (Box of 24)', 4, 200, 800);
-  insertDelivery.run(ord4.lastInsertRowid, customerMap['Apex Tech Corporate Office'], customers[3].address, customers[3].latitude, customers[3].longitude, 'New Order', 4, 'Awaiting dispatch approval');
+  await insertOrderItem.run(ord4.lastInsertRowid, productMap['500ml Water Bottles (Box of 24)'], '500ml Water Bottles (Box of 24)', 4, 200, 800);
+  await insertDelivery.run(ord4.lastInsertRowid, customerMap['Apex Tech Corporate Office'], customers[3].address, customers[3].latitude, customers[3].longitude, 'New Order', 4, 'Awaiting dispatch approval');
 
   // 7. Payments
   const insertPayment = db.prepare(`
@@ -388,13 +393,17 @@ async function seed() {
     VALUES (?, ?, ?, ?, ?, datetime('now'), 'Completed', ?)
   `);
 
-  insertPayment.run(customerMap['ABC Restaurant'], ord1.lastInsertRowid, null, 490, 'UPI', 'UPI Ref: 4291882901');
-  insertPayment.run(customerMap['Royal Biryani House'], ord3.lastInsertRowid, null, 200, 'Cash', 'Advance deposit collected');
-  insertPayment.run(customerMap['Deshmukh Residence'], null, 6, 70, 'Cash', 'Water payment on drop');
+  await insertPayment.run(customerMap['ABC Restaurant'], ord1.lastInsertRowid, null, 490, 'UPI', 'UPI Ref: 4291882901');
+  await insertPayment.run(customerMap['Royal Biryani House'], ord3.lastInsertRowid, null, 200, 'Cash', 'Advance deposit collected');
+  await insertPayment.run(customerMap['Deshmukh Residence'], null, 6, 70, 'Cash', 'Water payment on drop');
 
   console.log('Database seeded successfully with initial data!');
 }
 
-seed().catch(err => {
-  console.error('Error during seeding:', err);
-});
+if (require.main === module) {
+  seed().catch(err => {
+    console.error('Error during seeding:', err);
+  });
+}
+
+module.exports = { seed };

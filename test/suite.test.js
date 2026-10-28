@@ -738,3 +738,47 @@ test('11. Business Settings & Production Auth Security', async (t) => {
     }
   });
 });
+
+test('12. PostgreSQL Adapter, Query Normalization & Migration SQL Verification', async (t) => {
+  const postgres = require('../server/db/postgres');
+  const { migrateData } = require('../server/db/migrate');
+
+  await t.test('normalizeQuery translates SQLite dialect to valid PostgreSQL SQL', () => {
+    const q1 = postgres.normalizeQuery('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?', true);
+    assert.match(q1, /GREATEST\(0, stock - \$1\)/);
+    assert.match(q1, /WHERE id = \$2/);
+
+    const q2 = postgres.normalizeQuery("SELECT * FROM orders WHERE strftime('%Y-%m', order_date) = strftime('%Y-%m', 'now') AND name LIKE ?", false);
+    assert.match(q2, /TO_CHAR\(order_date, 'YYYY-MM'\)/);
+    assert.match(q2, /TO_CHAR\(CURRENT_DATE, 'YYYY-MM'\)/);
+    assert.match(q2, /ILIKE \$1/);
+
+    const q3 = postgres.normalizeQuery('INSERT OR REPLACE INTO business_settings (key, value) VALUES (?, ?)', true);
+    assert.match(q3, /INSERT INTO business_settings \(key, value\) VALUES \(\$1, \$2\) ON CONFLICT \(key\) DO UPDATE SET value = EXCLUDED\.value RETURNING key/);
+
+    const q4 = postgres.normalizeQuery('INSERT INTO customers (name, phone) VALUES (?, ?)', true);
+    assert.match(q4, /VALUES \(\$1, \$2\)\s+RETURNING id/i);
+  });
+
+  await t.test('schema.postgres.sql and migrate.js contain valid water_entries paid_amount DDL and SQL', () => {
+    const schemaSql = fs.readFileSync(path.join(__dirname, '..', 'server', 'db', 'schema.postgres.sql'), 'utf8');
+    assert.match(schemaSql, /paid_amount NUMERIC\(12, 2\) NOT NULL DEFAULT 0/);
+    assert.match(schemaSql, /ALTER TABLE water_entries ADD COLUMN IF NOT EXISTS paid_amount/);
+
+    const migrateJs = fs.readFileSync(path.join(__dirname, '..', 'server', 'db', 'migrate.js'), 'utf8');
+    assert.match(migrateJs, /INSERT INTO water_entries \(id, customer_id, product_id, quantity, price, total_amount, paid_amount, payment_status, date, time, notes, created_at\)/);
+    assert.doesNotMatch(migrateJs, /VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12\)\s*--\s*VALUES/);
+  });
+
+  await t.test('migrateData fails safely when DATABASE_URL is not configured', async () => {
+    const prevDbUrl = process.env.DATABASE_URL;
+    try {
+      delete process.env.DATABASE_URL;
+      const result = await migrateData();
+      assert.equal(result.success, false);
+      assert.equal(result.reason, 'MISSING_DATABASE_URL');
+    } finally {
+      if (prevDbUrl !== undefined) process.env.DATABASE_URL = prevDbUrl;
+    }
+  });
+});
