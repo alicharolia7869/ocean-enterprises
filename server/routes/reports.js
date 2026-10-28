@@ -115,7 +115,7 @@ router.get('/customer-wise', authMiddleware, async (req, res) => {
   try {
     const customers = await db.prepare('SELECT id, name, business_name, phone, customer_type FROM customers ORDER BY business_name ASC').all();
     const allOrders = await db.prepare("SELECT customer_id, total_amount, paid_amount FROM orders WHERE delivery_status != 'Cancelled'").all();
-    const allWater = await db.prepare("SELECT customer_id, quantity, total_amount, payment_status FROM water_entries").all();
+    const allWater = await db.prepare("SELECT customer_id, quantity, total_amount, paid_amount, payment_status FROM water_entries").all();
 
     const data = (customers || []).map(c => {
       const orders = (allOrders || []).filter(o => o.customer_id === c.id);
@@ -127,7 +127,11 @@ router.get('/customer-wise', authMiddleware, async (req, res) => {
       const totalSales = orderSales + waterSales;
 
       const orderPaid = orders.reduce((sum, o) => sum + (parseFloat(o.paid_amount) || 0), 0);
-      const waterPaid = water.filter(w => w.payment_status === 'Paid').reduce((sum, w) => sum + (parseFloat(w.total_amount) || 0), 0);
+      const waterPaid = water.reduce((sum, w) => {
+        const amt = parseFloat(w.total_amount) || 0;
+        const paid = w.payment_status === 'Paid' ? amt : Math.min(amt, parseFloat(w.paid_amount) || 0);
+        return sum + paid;
+      }, 0);
       const totalPaid = orderPaid + waterPaid;
       const pending = Math.max(0, totalSales - totalPaid);
 

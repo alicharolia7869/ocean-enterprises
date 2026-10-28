@@ -45,6 +45,9 @@ const healthHandler = (req, res) => {
   res.json({
     status: 'online',
     system: 'Ocean Enterprises Business Management System API (Vercel Serverless)',
+    storage: require('../server/db/postgres').isPostgresConfigured() ? 'postgresql' : 'ephemeral-json',
+    database_configured: require('../server/db/postgres').isPostgresConfigured(),
+    persistent: require('../server/db/postgres').isPostgresConfigured(),
     timestamp: new Date().toISOString()
   });
 };

@@ -88,10 +88,12 @@ router.get('/summary', authMiddleware, async (req, res) => {
         c.address,
         COALESCE(SUM(w.quantity), 0) as total_water_units,
         COALESCE(SUM(w.total_amount), 0) as total_amount,
-        COALESCE(SUM(CASE WHEN w.payment_status = 'Paid' THEN w.total_amount ELSE 0 END), 0) as paid_amount,
-        COALESCE(SUM(CASE WHEN w.payment_status = 'Pending' THEN w.total_amount ELSE 0 END), 0) as pending_amount,
+        COALESCE(SUM(CASE WHEN w.payment_status = 'Paid' THEN w.total_amount ELSE COALESCE(w.paid_amount, 0) END), 0) as paid_amount,
+        COALESCE(SUM(CASE WHEN w.payment_status = 'Paid' THEN 0 ELSE (w.total_amount - COALESCE(w.paid_amount, 0)) END), 0) as pending_amount,
+        COUNT(w.id) as delivery_days, /*
         COUNT(w.id) as delivery_days,
-        MAX(w.date) as last_water_date
+        COUNT(w.id) as delivery_days,
+        */ MAX(w.date) as last_water_date
       FROM customers c
       JOIN water_entries w ON c.id = w.customer_id
       WHERE strftime('%Y-%m', w.date) = ?
@@ -144,6 +146,12 @@ router.post('/', authMiddleware, async (req, res) => {
       }
     }
 
+    if (prodId && (unitPrice === null || isNaN(unitPrice))) {
+      const selectedProd = await db.prepare('SELECT * FROM products WHERE id = ?').get(prodId);
+      if (selectedProd && selectedProd.selling_price !== undefined) {
+        unitPrice = parseFloat(selectedProd.selling_price);
+      }
+    }
     const qty = parseInt(quantity, 10);
     const itemPrice = parseFloat(unitPrice || 35);
     const totalAmount = Math.round(qty * itemPrice);
@@ -196,7 +204,7 @@ router.post('/', authMiddleware, async (req, res) => {
     const customerPendingRes = await db.prepare(`
       SELECT 
         COALESCE((SELECT SUM(total_amount - paid_amount) FROM orders WHERE customer_id = ? AND payment_status != 'Paid' AND delivery_status != 'Cancelled'), 0) +
-        COALESCE((SELECT SUM(total_amount) FROM water_entries WHERE customer_id = ? AND payment_status = 'Pending'), 0) as pending
+        COALESCE((SELECT SUM(total_amount - COALESCE(paid_amount, 0)) FROM water_entries WHERE customer_id = ? AND payment_status != 'Paid'), 0) as pending
     `).get(customer_id, customer_id);
 
     const customerPending = parseFloat(customerPendingRes?.pending || 0);

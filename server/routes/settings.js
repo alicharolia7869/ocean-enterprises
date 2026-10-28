@@ -5,7 +5,25 @@ const { authMiddleware } = require('../middleware/auth');
 const router = express.Router();
 
 // GET /api/settings
-router.get('/', async (req, res) => {
+const PUBLIC_SETTING_KEYS = new Set(['business_name', 'currency']);
+
+router.get('/public', async (req, res) => {
+  try {
+    const rows = await db.prepare('SELECT key, value FROM business_settings').all();
+    const settings = {};
+    for (const r of rows || []) {
+      if (PUBLIC_SETTING_KEYS.has(r.key)) {
+        settings[r.key] = r.value;
+      }
+    }
+    res.json({ settings });
+  } catch (err) {
+    console.error('Error fetching public settings:', err);
+    res.status(500).json({ error: 'Error fetching public settings' });
+  }
+});
+
+router.get('/', authMiddleware, async (req, res) => {
   try {
     const rows = await db.prepare('SELECT key, value FROM business_settings').all();
     const settings = {};

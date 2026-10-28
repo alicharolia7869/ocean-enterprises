@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS water_entries (
   quantity INTEGER NOT NULL CHECK (quantity > 0),
   price NUMERIC(12, 2) NOT NULL,
   total_amount NUMERIC(12, 2) NOT NULL,
+  paid_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
   payment_status VARCHAR(50) DEFAULT 'Pending',
   date DATE NOT NULL DEFAULT CURRENT_DATE,
   time VARCHAR(50),
@@ -147,6 +148,14 @@ CREATE INDEX IF NOT EXISTS idx_deliveries_status ON deliveries(status);
 CREATE INDEX IF NOT EXISTS idx_deliveries_sequence ON deliveries(route_sequence);
 
 -- 9. Business Settings Key-Value Table
+CREATE TABLE IF NOT EXISTS business_settings (
+  key VARCHAR(255) PRIMARY KEY,
+  value TEXT
+);
+
+-- Non-destructive migration for partial water payment tracking on existing databases
+ALTER TABLE water_entries ADD COLUMN IF NOT EXISTS paid_amount NUMERIC(12, 2) NOT NULL DEFAULT 0;
+UPDATE water_entries SET paid_amount = total_amount WHERE payment_status = 'Paid' AND paid_amount = 0;
 CREATE TABLE IF NOT EXISTS business_settings (
   key VARCHAR(255) PRIMARY KEY,
   value TEXT

@@ -7,7 +7,8 @@ const router = express.Router();
 // GET /api/orders - List orders with filters & search
 router.get('/', authMiddleware, async (req, res) => {
   try {
-    const { filter, customerId, deliveryStatus, paymentStatus, search, startDate, endDate } = req.query;
+    const { filter, period, customerId, deliveryStatus, paymentStatus, search, startDate, endDate } = req.query;
+    const timeFilter = filter || period;
 
     let query = `
       SELECT o.*, 
@@ -38,21 +39,21 @@ router.get('/', authMiddleware, async (req, res) => {
 
     const now = new Date();
 
-    if (filter === 'Today') {
+    if (timeFilter === 'Today') {
       query += ` AND date(o.order_date) = date('now')`;
-    } else if (filter === 'Yesterday') {
+    } else if (timeFilter === 'Yesterday') {
       const yesterday = new Date(now);
       yesterday.setDate(yesterday.getDate() - 1);
       const yStr = yesterday.toISOString().slice(0, 10);
       query += ` AND date(o.order_date) = ?`;
       params.push(yStr);
-    } else if (filter === 'This Week') {
+    } else if (timeFilter === 'This Week') {
       const weekAgo = new Date(now);
       weekAgo.setDate(weekAgo.getDate() - 6);
       const wStr = weekAgo.toISOString().slice(0, 10);
       query += ` AND date(o.order_date) >= ?`;
       params.push(wStr);
-    } else if (filter === 'This Month') {
+    } else if (timeFilter === 'This Month') {
       query += ` AND strftime('%Y-%m', o.order_date) = strftime('%Y-%m', 'now')`;
     } else if (startDate && endDate) {
       query += ` AND date(o.order_date) >= ? AND date(o.order_date) <= ?`;
@@ -181,8 +182,8 @@ router.post('/', authMiddleware, async (req, res) => {
       paymentStatus = 'Partial';
     }
 
-    const countRes = await db.prepare('SELECT COUNT(*) as count FROM orders').get();
-    const nextOrderNum = `ORD-${new Date().getFullYear()}-${String((parseInt(countRes?.count, 10) || 0) + 1).padStart(4, '0')}`;
+    const maxIdRes = await db.prepare('SELECT COALESCE(MAX(id), 0) as max_id FROM orders').get();
+    const nextOrderNum = `ORD-${new Date().getFullYear()}-${String((parseInt(maxIdRes?.max_id, 10) || 0) + 1).padStart(4, '0')}`;
     const targetAddress = delivery_address || customer.address;
     const targetLat = latitude ? parseFloat(latitude) : (customer.latitude ? parseFloat(customer.latitude) : null);
     const targetLng = longitude ? parseFloat(longitude) : (customer.longitude ? parseFloat(customer.longitude) : null);
@@ -272,6 +273,20 @@ router.put('/:id/status', authMiddleware, async (req, res) => {
     const order = await db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
     if (!order) {
       return res.status(404).json({ error: 'Order not found' });
+    }
+
+    const wasCancelled = order.delivery_status === 'Cancelled';
+    const isCancelled = status === 'Cancelled';
+    if (!wasCancelled && isCancelled) {
+      const items = await db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
+      for (const it of items || []) {
+        await db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(it.quantity, it.product_id);
+      }
+    } else if (wasCancelled && !isCancelled) {
+      const items = await db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
+      for (const it of items || []) {
+        await db.prepare('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?').run(it.quantity, it.product_id);
+      }
     }
 
     await db.prepare('UPDATE orders SET delivery_status = ? WHERE id = ?').run(status, req.params.id);
@@ -474,10 +489,12 @@ router.delete('/:id', authMiddleware, async (req, res) => {
       return res.status(404).json({ error: 'Order not found' });
     }
 
-    // Revert inventory
-    const items = await db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(req.params.id);
-    for (const it of items || []) {
-      await db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(it.quantity, it.product_id);
+    // Revert inventory only if order was not already cancelled
+    if (order.delivery_status !== 'Cancelled') {
+      const items = await db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(req.params.id);
+      for (const it of items || []) {
+        await db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(it.quantity, it.product_id);
+      }
     }
 
     // Delete cascading

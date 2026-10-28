@@ -104,6 +104,18 @@ function saveStore() {
 
 loadStore();
 
+function getWaterPaidAmount(w) {
+  const total = Number(w.total_amount) || 0;
+  if (w.payment_status === 'Paid') return total;
+  return Math.min(total, Math.max(0, Number(w.paid_amount) || 0));
+}
+
+function getWaterPendingAmount(w) {
+  const total = Number(w.total_amount) || 0;
+  if (w.payment_status === 'Paid') return 0;
+  return Math.max(0, total - getWaterPaidAmount(w));
+}
+
 // Query engine implementing prepare(sql).get(...), .all(...), .run(...)
 class Statement {
   constructor(sql) {
@@ -300,6 +312,12 @@ class Statement {
     // 11. DELETE FROM customers
     if (/^DELETE FROM customers WHERE id = \?/i.test(s)) {
       const id = Number(params[0]);
+      const custOrderIds = new Set(store.orders.filter(o => o.customer_id === id).map(o => o.id));
+      store.order_items = store.order_items.filter(oi => !custOrderIds.has(oi.order_id));
+      store.orders = store.orders.filter(o => o.customer_id !== id);
+      store.water_entries = store.water_entries.filter(w => w.customer_id !== id);
+      store.deliveries = store.deliveries.filter(d => d.customer_id !== id && !custOrderIds.has(d.order_id));
+      store.payments = store.payments.filter(p => p.customer_id !== id && !custOrderIds.has(p.order_id));
       store.customers = store.customers.filter(c => c.id !== id);
       saveStore();
       return { changes: 1 };
@@ -310,15 +328,15 @@ class Statement {
       const id = ++store.sequences.water_entries;
       let customer_id, product_id, quantity, price, total_amount, payment_status, date, time, notes;
       
-      // Check if it's the standard 9-param or date('now') variant
+      // Check if it's the standard 9-param or seed date('now') variants
       if (params.length === 9) {
         [customer_id, product_id, quantity, price, total_amount, payment_status, date, time, notes] = params;
-      } else if (params.length === 6) {
+      } else if (params.length === 7) {
         // seed format: (customer_id, product_id, quantity, price, total_amount, payment_status, notes)
         [customer_id, product_id, quantity, price, total_amount, payment_status, notes] = params;
         date = new Date().toISOString().slice(0, 10);
         time = new Date().toTimeString().slice(0, 8);
-      } else if (params.length === 7) {
+      } else if (params.length === 8) {
         // past water format in seed: (customer_id, product_id, quantity, price, total_amount, payment_status, daysOffset, notes)
         const [cid, pid, q, pr, tot, pstat, offset, n] = params;
         customer_id = cid;
@@ -335,6 +353,7 @@ class Statement {
         notes = n;
       }
 
+      const normStatus = payment_status || 'Pending';
       const entry = {
         id,
         customer_id: Number(customer_id),
@@ -342,7 +361,8 @@ class Statement {
         quantity: Number(quantity),
         price: Number(price),
         total_amount: Number(total_amount),
-        payment_status: payment_status || 'Pending',
+        paid_amount: normStatus === 'Paid' ? Number(total_amount) : 0,
+        payment_status: normStatus,
         date: date || new Date().toISOString().slice(0, 10),
         time: time || new Date().toTimeString().slice(0, 8),
         notes: notes || '',
@@ -472,7 +492,8 @@ class Statement {
     if (/UPDATE deliveries SET status =/i.test(s)) {
       const id = Number(params[params.length - 1]);
       const status = params[0];
-      const deliv = store.deliveries.find(d => d.id === id);
+      const byOrderId = /WHERE\s+order_id\s*=\s*\?/i.test(s);
+      const deliv = store.deliveries.find(d => (byOrderId ? d.order_id === id : d.id === id));
       if (deliv) {
         deliv.status = status;
         if (params.length > 2 && params[1]) deliv.driver_notes = params[1];
@@ -487,10 +508,16 @@ class Statement {
 
     if (/UPDATE water_entries SET payment_status =/i.test(s)) {
       const id = Number(params[params.length - 1]);
-      const status = params.length === 2 ? params[0] : 'Paid';
       const w = store.water_entries.find(item => item.id === id);
       if (w) {
-        w.payment_status = status;
+        if (/paid_amount\s*=\s*\?/i.test(s) && params.length >= 3) {
+          w.payment_status = params[0];
+          w.paid_amount = Number(params[1]) || 0;
+        } else {
+          const status = params.length === 2 ? params[0] : 'Paid';
+          w.payment_status = status;
+          if (status === 'Paid') w.paid_amount = Number(w.total_amount) || 0;
+        }
         saveStore();
         return { changes: 1 };
       }
@@ -500,13 +527,24 @@ class Statement {
     // 20. INSERT INTO payments
     if (/^INSERT INTO payments/i.test(s)) {
       const id = ++store.sequences.payments;
-      const [customer_id, order_id, water_entry_id, amount, payment_mode, notes] = params;
+      let customer_id, order_id, water_entry_id, amount, payment_mode, notes;
+      if (params.length === 5 && /VALUES\s*\(\s*\?\s*,\s*NULL\s*,\s*\?/i.test(s)) {
+        // VALUES (?, NULL, ?, ?, ?, ...) -> order_id is literal NULL
+        [customer_id, water_entry_id, amount, payment_mode, notes] = params;
+        order_id = null;
+      } else if (params.length === 5 && /VALUES\s*\(\s*\?\s*,\s*\?\s*,\s*NULL/i.test(s)) {
+        // VALUES (?, ?, NULL, ?, ?, ...) -> water_entry_id is literal NULL
+        [customer_id, order_id, amount, payment_mode, notes] = params;
+        water_entry_id = null;
+      } else {
+        [customer_id, order_id, water_entry_id, amount, payment_mode, notes] = params;
+      }
       const payment = {
         id,
         customer_id: Number(customer_id),
         order_id: order_id ? Number(order_id) : null,
         water_entry_id: water_entry_id ? Number(water_entry_id) : null,
-        amount: Number(amount),
+        amount: Number(amount) || 0,
         payment_mode: payment_mode || 'Cash',
         payment_date: new Date().toISOString(),
         status: 'Completed',
@@ -632,6 +670,12 @@ class Statement {
       return { count: store.orders.length };
     }
 
+    if (/SELECT COALESCE\(MAX\(id\), 0\) as max_id FROM orders/i.test(s)) {
+      const maxFromOrders = store.orders.reduce((max, o) => Math.max(max, Number(o.id) || 0), 0);
+      const seqOrders = Number(store.sequences?.orders) || 0;
+      return { max_id: Math.max(maxFromOrders, seqOrders) };
+    }
+
     if (/SELECT COUNT\(\*\) as count FROM deliveries\s*$/i.test(s)) {
       return { count: store.deliveries.length };
     }
@@ -706,10 +750,10 @@ class Statement {
     }
 
     // Pending water entries total
-    if (/SELECT COALESCE\(SUM\(total_amount\), 0\) as total\s+FROM water_entries\s+WHERE payment_status = 'Pending'/i.test(s)) {
+    if (/SELECT COALESCE\(SUM\(total_amount(?:\s*-\s*COALESCE\(paid_amount,\s*0\))?\), 0\) as total\s+FROM water_entries\s+WHERE payment_status (?:=\s*'Pending'|!=\s*'Paid')/i.test(s)) {
       const total = store.water_entries
-        .filter(w => w.payment_status === 'Pending')
-        .reduce((sum, w) => sum + (w.total_amount || 0), 0);
+        .filter(w => w.customer_id && w.payment_status !== 'Paid')
+        .reduce((sum, w) => sum + getWaterPendingAmount(w), 0);
       return { total };
     }
 
@@ -786,8 +830,8 @@ class Statement {
         .filter(o => o.customer_id === custId && o.payment_status !== 'Paid' && o.delivery_status !== 'Cancelled')
         .reduce((acc, o) => acc + Math.max(0, (o.total_amount || 0) - (o.paid_amount || 0)), 0);
       const waterPending = store.water_entries
-        .filter(w => w.customer_id === custId && w.payment_status === 'Pending')
-        .reduce((acc, w) => acc + (w.total_amount || 0), 0);
+        .filter(w => w.customer_id === custId && w.payment_status !== 'Paid')
+        .reduce((acc, w) => acc + getWaterPendingAmount(w), 0);
       return { pending: orderPending + waterPending };
     }
 
@@ -848,7 +892,7 @@ class Statement {
     // 1. Customer monthly water summary (check before generic FROM customers c)
     if (/SELECT\s+c\.id as customer_id.*FROM customers c\s+JOIN water_entries w/is.test(s)) {
       const month = params[0] || new Date().toISOString().slice(0, 7);
-      const entries = store.water_entries.filter(w => (w.date || '').slice(0, 7) === month);
+      const entries = store.water_entries.filter(w => w.customer_id && (w.date || '').slice(0, 7) === month);
 
       const grouped = {};
       for (const w of entries) {
@@ -871,8 +915,8 @@ class Statement {
         const g = grouped[w.customer_id];
         g.total_water_units += w.quantity || 0;
         g.total_amount += w.total_amount || 0;
-        if (w.payment_status === 'Paid') g.paid_amount += w.total_amount || 0;
-        else g.pending_amount += w.total_amount || 0;
+        g.paid_amount += getWaterPaidAmount(w);
+        g.pending_amount += getWaterPendingAmount(w);
         g.delivery_days.add(w.date);
         if (!g.last_water_date || w.date > g.last_water_date) g.last_water_date = w.date;
       }
@@ -920,8 +964,8 @@ class Statement {
           .filter(o => o.customer_id === c.id && o.payment_status !== 'Paid' && o.delivery_status !== 'Cancelled')
           .reduce((acc, o) => acc + Math.max(0, (o.total_amount || 0) - (o.paid_amount || 0)), 0);
         const waterPending = custWater
-          .filter(w => w.payment_status === 'Pending')
-          .reduce((acc, w) => acc + (w.total_amount || 0), 0);
+          .filter(w => w.payment_status !== 'Paid')
+          .reduce((acc, w) => acc + getWaterPendingAmount(w), 0);
         const balance_pending = orderPending + waterPending;
 
         const lastOrder = [...custOrders].sort((a, b) => (b.order_date || '').localeCompare(a.order_date || ''))[0];
@@ -964,7 +1008,7 @@ class Statement {
 
     // 5. Water entries listing
     if (/FROM water_entries w/i.test(s)) {
-      let list = [...store.water_entries];
+      let list = store.water_entries.filter(w => Boolean(w.customer_id));
       let pIdx = 0;
 
       if (/w\.date = \?/i.test(s)) {
@@ -1153,8 +1197,8 @@ class Statement {
         if (!months[m]) months[m] = { month: m, total_water_units: 0, total_orders: 0, total_sales: 0, total_paid: 0, total_pending: 0 };
         months[m].total_water_units += w.quantity || 0;
         months[m].total_sales += w.total_amount || 0;
-        if (w.payment_status === 'Paid') months[m].total_paid += w.total_amount || 0;
-        else months[m].total_pending += w.total_amount || 0;
+        months[m].total_paid += getWaterPaidAmount(w);
+        months[m].total_pending += getWaterPendingAmount(w);
       });
 
       store.orders.filter(o => o.customer_id === custId && o.delivery_status !== 'Cancelled').forEach(o => {
@@ -1227,12 +1271,14 @@ class Statement {
       return [...store.order_items];
     }
     if (/FROM water_entries/i.test(s)) {
-      let list = [...store.water_entries];
+      let list = store.water_entries.filter(w => Boolean(w.customer_id));
       if (/WHERE customer_id = \?/i.test(s)) {
         list = list.filter(w => w.customer_id === Number(params[0]));
       }
       if (/payment_status = 'Pending'/i.test(s)) {
         list = list.filter(w => w.payment_status === 'Pending');
+      } else if (/payment_status != 'Paid'/i.test(s)) {
+        list = list.filter(w => w.payment_status !== 'Paid');
       }
       return list;
     }

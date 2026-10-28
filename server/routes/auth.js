@@ -46,6 +46,10 @@ router.post('/login', async (req, res) => {
       }
     });
   } catch (err) {
+    if (err.code === 'ERR_MISSING_JWT_SECRET' || err.code === 'ERR_WEAK_JWT_SECRET') {
+      console.error('Login configuration error:', err.message);
+      return res.status(503).json({ error: 'Authentication service is not configured. Please set a strong JWT_SECRET in production.' });
+    }
     console.error('Login error:', err);
     res.status(500).json({ error: 'Server error during login' });
   }

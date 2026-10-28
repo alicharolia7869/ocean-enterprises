@@ -94,6 +94,22 @@ router.put('/:id/status', authMiddleware, async (req, res) => {
         .run(status, driver_notes || null, req.params.id);
     }
 
+    const prevOrder = await db.prepare('SELECT * FROM orders WHERE id = ?').get(deliv.order_id);
+    if (prevOrder) {
+      const wasCancelled = prevOrder.delivery_status === 'Cancelled';
+      const isCancelled = status === 'Cancelled';
+      if (!wasCancelled && isCancelled) {
+        const items = await db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(prevOrder.id);
+        for (const it of items || []) {
+          await db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(it.quantity, it.product_id);
+        }
+      } else if (wasCancelled && !isCancelled) {
+        const items = await db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(prevOrder.id);
+        for (const it of items || []) {
+          await db.prepare('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?').run(it.quantity, it.product_id);
+        }
+      }
+    }
     // Sync status to associated order
     await db.prepare('UPDATE orders SET delivery_status = ? WHERE id = ?')
       .run(status, deliv.order_id);

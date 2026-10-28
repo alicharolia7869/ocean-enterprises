@@ -48,6 +48,9 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'online',
     system: 'Ocean Enterprises Business Management System API',
+    storage: require('./db/postgres').isPostgresConfigured() ? 'postgresql' : (Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) ? 'ephemeral-json' : 'local-json'),
+    database_configured: require('./db/postgres').isPostgresConfigured(),
+    persistent: require('./db/postgres').isPostgresConfigured() || !Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME),
     timestamp: new Date().toISOString()
   });
 });

@@ -25,10 +25,22 @@ function getPool() {
   }
 
   const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
+  const strictSsl = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== undefined
+    ? process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false'
+    : /sslmode=(verify-ca|verify-full)/i.test(connectionString);
+
+  let sslConfig = false;
+  if (!isLocal) {
+    sslConfig = { rejectUnauthorized: strictSsl };
+    if (process.env.PGSSLROOTCERT && fs.existsSync(process.env.PGSSLROOTCERT)) {
+      sslConfig.ca = fs.readFileSync(process.env.PGSSLROOTCERT, 'utf8');
+      sslConfig.rejectUnauthorized = true;
+    }
+  }
 
   pool = new Pool({
     connectionString,
-    ssl: isLocal ? false : { rejectUnauthorized: false },
+    ssl: sslConfig,
     max: parseInt(process.env.PG_MAX_CONNECTIONS || '10', 10),
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000
@@ -121,9 +133,30 @@ async function transaction(callback) {
   const p = getPool();
   if (!p) throw new Error('PostgreSQL is not configured. DATABASE_URL is required.');
   const client = await p.connect();
+  const txContext = {
+    query: (sql, params = []) => client.query(sql, params),
+    prepare: (sql) => ({
+      run: async (...rawParams) => {
+        const params = rawParams.length === 1 && Array.isArray(rawParams[0]) ? rawParams[0] : rawParams;
+        const result = await client.query(normalizeQuery(sql), params);
+        const lastInsertRowid = result.rows && result.rows[0] && (result.rows[0].id || result.rows[0].key) ? (result.rows[0].id || result.rows[0].key) : null;
+        return { lastInsertRowid, changes: result.rowCount || 0 };
+      },
+      get: async (...rawParams) => {
+        const params = rawParams.length === 1 && Array.isArray(rawParams[0]) ? rawParams[0] : rawParams;
+        const result = await client.query(normalizeQuery(sql), params);
+        return result.rows[0] ? normalizeRow(result.rows[0]) : null;
+      },
+      all: async (...rawParams) => {
+        const params = rawParams.length === 1 && Array.isArray(rawParams[0]) ? rawParams[0] : rawParams;
+        const result = await client.query(normalizeQuery(sql), params);
+        return (result.rows || []).map(normalizeRow);
+      }
+    })
+  };
   try {
     await client.query('BEGIN');
-    const result = await callback(client);
+    const result = await callback(txContext);
     await client.query('COMMIT');
     return result;
   } catch (err) {

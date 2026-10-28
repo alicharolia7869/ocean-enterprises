@@ -395,7 +395,7 @@ test('7. Orders & WhatsApp Parsing', async (t) => {
   });
 
   await t.test('GET /api/orders returns joined customer fields and supports filters', async () => {
-    const res = await req(`/api/orders?period=This%20Week&customerId=${testCustomerId}`);
+    const res = await req(`/api/orders?filter=This%20Week&customerId=${testCustomerId}`);
     assert.equal(res.status, 200);
     assert.ok(Array.isArray(res.data.orders));
     const found = res.data.orders.find(o => o.id === testOrderId);
@@ -423,7 +423,10 @@ test('7. Orders & WhatsApp Parsing', async (t) => {
     assert.equal(res.data.status, 'Delivered');
   });
 
-  await t.test('Cancelled orders are excluded from customer pending balance and can be deleted', async () => {
+  await t.test('Cancelled orders restore stock, are excluded from customer pending balance, and can be deleted without duplicate order_number', async () => {
+    const beforeProdRes = await req('/api/products');
+    const stockBeforeOrder = beforeProdRes.data.products.find(p => p.id === testProductId).stock;
+
     const createRes = await req('/api/orders', {
       method: 'POST',
       body: JSON.stringify({
@@ -434,20 +437,29 @@ test('7. Orders & WhatsApp Parsing', async (t) => {
     assert.equal(createRes.status, 201);
     const tempOrderId = createRes.data.order.id;
 
-    // Cancel order
+    const afterCreateProdRes = await req('/api/products');
+    assert.equal(afterCreateProdRes.data.products.find(p => p.id === testProductId).stock, stockBeforeOrder - 2);
+
+    // Cancel order and verify stock is restored
     const cancelRes = await req(`/api/orders/${tempOrderId}/status`, {
       method: 'PUT',
       body: JSON.stringify({ status: 'Cancelled' })
     });
     assert.equal(cancelRes.status, 200);
 
+    const afterCancelProdRes = await req('/api/products');
+    assert.equal(afterCancelProdRes.data.products.find(p => p.id === testProductId).stock, stockBeforeOrder, 'Cancelling order must restore stock');
+
     // Check customer pending balance is still 2250 (1250 water + 1000 active order), not 2750
     const custRes = await req(`/api/customers/${testCustomerId}`);
     assert.equal(custRes.data.customer.pending_balance, 2250);
 
-    // Delete temporary order
+    // Delete temporary order and verify stock is not double-restored
     const delRes = await req(`/api/orders/${tempOrderId}`, { method: 'DELETE' });
     assert.equal(delRes.status, 200);
+
+    const afterDeleteProdRes = await req('/api/products');
+    assert.equal(afterDeleteProdRes.data.products.find(p => p.id === testProductId).stock, stockBeforeOrder, 'Deleting already cancelled order must not double-restore stock');
   });
 });
 
@@ -520,6 +532,132 @@ test('9. Payment Allocation & Customer Balance', async (t) => {
     // Verify customer outstanding balance decreased to 0
     const custRes = await req(`/api/customers/${testCustomerId}`);
     assert.equal(custRes.data.customer.pending_balance, 0);
+
+    // Verify stored payment records in GET /api/payments have accurate amounts and payment modes
+    const paymentsListRes = await req(`/api/payments?customerId=${testCustomerId}`);
+    assert.equal(paymentsListRes.status, 200);
+    assert.ok(Array.isArray(paymentsListRes.data.payments));
+    const orderPayment = paymentsListRes.data.payments.find(p => p.order_id === testOrderId);
+    assert.ok(orderPayment, 'Payment linked to testOrderId must be stored properly');
+    assert.equal(orderPayment.amount, 1000, 'Stored order payment amount must equal 1000 (not NaN/0)');
+    assert.equal(orderPayment.payment_mode, 'Cash');
+    const waterPayment = paymentsListRes.data.payments.find(p => p.notes === 'Clearing water entry');
+    assert.ok(waterPayment, 'Water settlement payment must be stored with accurate notes');
+    assert.equal(waterPayment.amount, 1250, 'Stored water payment amount must equal 1250 (not NaN/0)');
+    assert.equal(waterPayment.payment_mode, 'Bank Transfer');
+  });
+
+  await t.test('Partial and multi-step payments on water entries update balances, dashboard, summary, and reports accurately', async () => {
+    // 1. Create a water entry of ₹350 (10 jars @ ₹35)
+    const w1Res = await req('/api/water', {
+      method: 'POST',
+      body: JSON.stringify({
+        customer_id: testCustomerId,
+        product_id: testProductId,
+        quantity: 10,
+        price: 35,
+        payment_status: 'Pending',
+        notes: 'Partial water payment test #1'
+      })
+    });
+    assert.equal(w1Res.status, 201);
+    assert.equal(w1Res.data.entry.total_amount, 350);
+    const w1Id = w1Res.data.entry.id;
+
+    // 2. Record a ₹200 partial payment -> must leave ₹150 outstanding
+    const p1Res = await req('/api/payments', {
+      method: 'POST',
+      body: JSON.stringify({
+        customer_id: testCustomerId,
+        amount: 200,
+        payment_mode: 'UPI',
+        notes: 'Partial payment of 200 toward 350 water entry'
+      })
+    });
+    assert.equal(p1Res.status, 201);
+
+    // Verify customer detail balance is 150
+    const custAfterP1 = await req(`/api/customers/${testCustomerId}`);
+    assert.equal(custAfterP1.data.customer.pending_balance, 150, '₹350 water entry with ₹200 payment must leave ₹150 outstanding');
+    const w1EntryAfterP1 = custAfterP1.data.waterEntries.find(w => w.id === w1Id);
+    assert.equal(w1EntryAfterP1.payment_status, 'Partial');
+    assert.equal(Number(w1EntryAfterP1.paid_amount), 200);
+
+    // Verify GET /api/customers list balance_pending is 150
+    const custListAfterP1 = await req('/api/customers');
+    const listedCust = custListAfterP1.data.customers.find(c => c.id === testCustomerId);
+    assert.equal(listedCust.balance_pending, 150);
+
+    // Verify GET /api/payments pendingCustomers shows 150
+    const payListAfterP1 = await req('/api/payments');
+    const pendingCust = payListAfterP1.data.pendingCustomers.find(c => c.customer_id === testCustomerId);
+    assert.ok(pendingCust);
+    assert.equal(pendingCust.total_pending, 150);
+
+    // Verify GET /api/reports/customer-wise shows 150 pending
+    const reportAfterP1 = await req('/api/reports/customer-wise');
+    const custReportAfterP1 = reportAfterP1.data.customerWise.find(c => c.customer_id === testCustomerId);
+    assert.equal(custReportAfterP1.total_pending, 150);
+
+    // Verify GET /api/water/summary reflects partial paid_amount and pending_amount
+    const summaryAfterP1 = await req('/api/water/summary');
+    const custSummary = summaryAfterP1.data.monthlySummary.find(m => m.customer_id === testCustomerId);
+    assert.ok(custSummary);
+    assert.equal(custSummary.pending_amount, 150);
+
+    // 3. Create a second water entry of ₹250 (5 jars @ ₹50) -> total pending becomes 150 + 250 = 400
+    const w2Res = await req('/api/water', {
+      method: 'POST',
+      body: JSON.stringify({
+        customer_id: testCustomerId,
+        product_id: testProductId,
+        quantity: 5,
+        price: 50,
+        payment_status: 'Pending',
+        notes: 'Partial water payment test #2'
+      })
+    });
+    assert.equal(w2Res.status, 201);
+    const w2Id = w2Res.data.entry.id;
+
+    // 4. Pay ₹300 -> settles remaining ₹150 of w1 ('Paid') and ₹150 of w2 ('Partial', leaving ₹100)
+    const p2Res = await req('/api/payments', {
+      method: 'POST',
+      body: JSON.stringify({
+        customer_id: testCustomerId,
+        amount: 300,
+        payment_mode: 'Cash',
+        notes: 'Multi-entry water settlement (150 + 150)'
+      })
+    });
+    assert.equal(p2Res.status, 201);
+
+    const custAfterP2 = await req(`/api/customers/${testCustomerId}`);
+    assert.equal(custAfterP2.data.customer.pending_balance, 100);
+    assert.equal(custAfterP2.data.waterEntries.find(w => w.id === w1Id).payment_status, 'Paid');
+    assert.equal(custAfterP2.data.waterEntries.find(w => w.id === w2Id).payment_status, 'Partial');
+    assert.equal(Number(custAfterP2.data.waterEntries.find(w => w.id === w2Id).paid_amount), 150);
+
+    // 5. Pay remaining ₹100 to clear balance to 0, then clean up w1 & w2 so downstream report counts match
+    const p3Res = await req('/api/payments', {
+      method: 'POST',
+      body: JSON.stringify({
+        customer_id: testCustomerId,
+        water_entry_id: w2Id,
+        amount: 100,
+        payment_mode: 'Cash',
+        notes: 'Final 100 water payment'
+      })
+    });
+    assert.equal(p3Res.status, 201);
+
+    const custAfterP3 = await req(`/api/customers/${testCustomerId}`);
+    assert.equal(custAfterP3.data.customer.pending_balance, 0);
+    assert.equal(custAfterP3.data.waterEntries.find(w => w.id === w2Id).payment_status, 'Paid');
+
+    // Clean up temporary water entries w1 and w2
+    await req(`/api/water/${w1Id}`, { method: 'DELETE' });
+    await req(`/api/water/${w2Id}`, { method: 'DELETE' });
   });
 });
 
@@ -549,8 +687,21 @@ test('10. Business Reports & Analytics', async (t) => {
   });
 });
 
-test('11. Business Settings', async (t) => {
-  await t.test('GET and update business settings', async () => {
+test('11. Business Settings & Production Auth Security', async (t) => {
+  await t.test('Unauthenticated GET /api/settings is rejected with 401 while /api/settings/public returns only public branding', async () => {
+    const unauthRes = await fetch(`${baseUrl}/api/settings`);
+    assert.equal(unauthRes.status, 401, 'Private business settings must require authentication');
+
+    const pubRes = await fetch(`${baseUrl}/api/settings/public`);
+    assert.equal(pubRes.status, 200);
+    const pubData = await pubRes.json();
+    assert.ok(pubData.settings);
+    assert.equal(pubData.settings.upi_id, undefined, 'Public settings must not expose UPI ID');
+    assert.equal(pubData.settings.phone, undefined, 'Public settings must not expose private phone');
+    assert.equal(pubData.settings.address, undefined, 'Public settings must not expose warehouse address');
+  });
+
+  await t.test('GET and update business settings when authenticated', async () => {
     const getRes = await req('/api/settings');
     assert.equal(getRes.status, 200);
 
@@ -563,5 +714,27 @@ test('11. Business Settings', async (t) => {
     });
     assert.equal(putRes.status, 200);
     assert.equal(putRes.data.settings.business_name, 'Ocean Enterprises Karachi');
+  });
+
+  await t.test('Production JWT authentication rejects missing or weak JWT_SECRET without fallback', async () => {
+    const { getJwtSecret } = require('../server/middleware/auth');
+    const prevNodeEnv = process.env.NODE_ENV;
+    const prevSecret = process.env.JWT_SECRET;
+    try {
+      process.env.NODE_ENV = 'production';
+      delete process.env.JWT_SECRET;
+      assert.throws(() => getJwtSecret(), /JWT_SECRET environment variable must be configured in production/);
+
+      process.env.JWT_SECRET = 'short_secret';
+      assert.throws(() => getJwtSecret(), /at least 16 characters/);
+
+      process.env.JWT_SECRET = 'strong_production_secret_key_2026_verified';
+      assert.equal(getJwtSecret(), 'strong_production_secret_key_2026_verified');
+    } finally {
+      if (prevNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = prevNodeEnv;
+      if (prevSecret === undefined) delete process.env.JWT_SECRET;
+      else process.env.JWT_SECRET = prevSecret;
+    }
   });
 });

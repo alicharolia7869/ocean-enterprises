@@ -4,8 +4,9 @@ import { Lock, Mail, ArrowRight } from 'lucide-react';
 
 export default function Login() {
   const { login } = useAuth();
-  const [emailOrPhone, setEmailOrPhone] = useState('admin@ocean.com');
-  const [password, setPassword] = useState('admin123');
+  const isDev = Boolean(import.meta.env?.DEV);
+  const [emailOrPhone, setEmailOrPhone] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -137,27 +138,29 @@ export default function Login() {
           </button>
         </form>
 
-        {/* Preset quick test button */}
-        <div style={{
-          borderTop: '1px solid #f1f5f9',
-          paddingTop: '14px',
-          textAlign: 'center'
-        }}>
-          <button
-            type="button"
-            onClick={fillDemo}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#0284c7',
-              fontSize: '12px',
-              fontWeight: '600',
-              cursor: 'pointer'
-            }}
-          >
-            ⚡ Auto-fill Default Admin (admin@ocean.com)
-          </button>
-        </div>
+        {/* Preset quick test button (development only) */}
+        {isDev && (
+          <div style={{
+            borderTop: '1px solid #f1f5f9',
+            paddingTop: '14px',
+            textAlign: 'center'
+          }}>
+            <button
+              type="button"
+              onClick={fillDemo}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#0284c7',
+                fontSize: '12px',
+                fontWeight: '600',
+                cursor: 'pointer'
+              }}
+            >
+              ⚡ Auto-fill Default Admin (admin@ocean.com)
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

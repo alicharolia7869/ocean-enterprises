@@ -81,12 +81,12 @@ router.get('/stats', authMiddleware, async (req, res) => {
     `).get();
     const pendingOrderPayments = parseFloat(pendingOrderPayRes?.total || 0);
 
-    const pendingWaterPayRes = await db.prepare(`
+    const pendingWaterPayRes = await db.prepare("SELECT COALESCE(SUM(total_amount - COALESCE(paid_amount, 0)), 0) as total FROM water_entries WHERE payment_status != 'Paid'").get(); /*
       SELECT COALESCE(SUM(total_amount), 0) as total
       FROM water_entries 
-      WHERE payment_status = 'Pending'
+      WHERE payment_status != 'Paid'
     `).get();
-    const pendingWaterPayments = parseFloat(pendingWaterPayRes?.total || 0);
+    */ const pendingWaterPayments = parseFloat(pendingWaterPayRes?.total || 0);
 
     const totalPendingAmount = Math.round(pendingOrderPayments + pendingWaterPayments);
 

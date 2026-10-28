@@ -114,11 +114,12 @@ async function migrateData() {
 
     // 3g. Water Entries
     for (const w of store.water_entries || []) {
+      if (!w.customer_id || !w.quantity || w.quantity <= 0) continue;
       await client.query(
-        `INSERT INTO water_entries (id, customer_id, product_id, quantity, price, total_amount, payment_status, date, time, notes, created_at)
+        `INSERT INTO water_entries (id, customer_id, product_id, quantity, price, total_amount, paid_amount, payment_status, date, time, notes, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) --
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT (id) DO NOTHING`,
-        [w.id, w.customer_id, w.product_id || null, w.quantity, w.price, w.total_amount, w.payment_status || 'Pending', w.date, w.time || '', w.notes || '', w.created_at || new Date()]
+        [w.id, w.customer_id, w.product_id || null, w.quantity, w.price ?? 0, w.total_amount ?? 0, w.paid_amount !== undefined ? w.paid_amount : (w.payment_status === 'Paid' ? (w.total_amount ?? 0) : 0), w.payment_status || 'Pending', w.date, w.time || '', w.notes || '', w.created_at || new Date()]
       );
     }
 

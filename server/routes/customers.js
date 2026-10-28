@@ -23,7 +23,7 @@ router.get('/', authMiddleware, async (req, res) => {
         ) as total_amount,
         (
           COALESCE((SELECT SUM(total_amount - paid_amount) FROM orders o WHERE o.customer_id = c.id AND o.payment_status != 'Paid' AND o.delivery_status != 'Cancelled'), 0) +
-          COALESCE((SELECT SUM(total_amount) FROM water_entries w WHERE w.customer_id = c.id AND w.payment_status = 'Pending'), 0)
+          COALESCE((SELECT SUM(total_amount - COALESCE(paid_amount, 0)) FROM water_entries w WHERE w.customer_id = c.id AND w.payment_status != 'Paid'), 0)
         ) as balance_pending,
         (
           SELECT MAX(order_date) FROM orders o WHERE o.customer_id = c.id
@@ -129,13 +129,12 @@ router.get('/:id', authMiddleware, async (req, res) => {
       }
       const qty = parseInt(w.quantity, 10) || 0;
       const amt = parseFloat(w.total_amount) || 0;
+      const wPaid = w.payment_status === 'Paid' ? amt : Math.min(amt, parseFloat(w.paid_amount) || 0);
+      const wPending = Math.max(0, amt - wPaid);
       monthsMap[m].total_water_units += qty;
       monthsMap[m].total_sales += amt;
-      if (w.payment_status === 'Paid') {
-        monthsMap[m].total_paid += amt;
-      } else {
-        monthsMap[m].total_pending += amt;
-      }
+      monthsMap[m].total_paid += wPaid;
+      monthsMap[m].total_pending += wPending;
     });
 
     (parsedOrders || []).forEach(o => {
