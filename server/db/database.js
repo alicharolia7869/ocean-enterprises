@@ -518,10 +518,34 @@ class Statement {
       return { lastInsertRowid: id, changes: 1 };
     }
 
-    // 21. DELETE FROM payments
+    // 21. DELETE FROM payments / deliveries / order_items / orders
     if (/DELETE FROM payments WHERE water_entry_id = \?/i.test(s)) {
       const id = Number(params[0]);
       store.payments = store.payments.filter(p => p.water_entry_id !== id);
+      saveStore();
+      return { changes: 1 };
+    }
+    if (/DELETE FROM payments WHERE order_id = \?/i.test(s)) {
+      const id = Number(params[0]);
+      store.payments = store.payments.filter(p => p.order_id !== id);
+      saveStore();
+      return { changes: 1 };
+    }
+    if (/DELETE FROM deliveries WHERE order_id = \?/i.test(s)) {
+      const id = Number(params[0]);
+      store.deliveries = store.deliveries.filter(d => d.order_id !== id);
+      saveStore();
+      return { changes: 1 };
+    }
+    if (/DELETE FROM order_items WHERE order_id = \?/i.test(s)) {
+      const id = Number(params[0]);
+      store.order_items = store.order_items.filter(oi => oi.order_id !== id);
+      saveStore();
+      return { changes: 1 };
+    }
+    if (/DELETE FROM orders WHERE id = \?/i.test(s)) {
+      const id = Number(params[0]);
+      store.orders = store.orders.filter(o => o.id !== id);
       saveStore();
       return { changes: 1 };
     }
@@ -569,7 +593,9 @@ class Statement {
       const u = store.users.find(user => user.id === Number(params[0]));
       if (!u) return undefined;
       const copy = { ...u };
-      delete copy.password_hash;
+      if (!/SELECT \*/i.test(s)) {
+        delete copy.password_hash;
+      }
       return copy;
     }
 
@@ -600,6 +626,14 @@ class Statement {
     // Total counts / aggregations
     if (/SELECT COUNT\(\*\) as count FROM customers/i.test(s)) {
       return { count: store.customers.length };
+    }
+
+    if (/SELECT COUNT\(\*\) as count FROM orders\s*$/i.test(s)) {
+      return { count: store.orders.length };
+    }
+
+    if (/SELECT COUNT\(\*\) as count FROM deliveries\s*$/i.test(s)) {
+      return { count: store.deliveries.length };
     }
 
     // Today's order count
@@ -666,7 +700,7 @@ class Statement {
     // Pending orders payment total
     if (/SELECT COALESCE\(SUM\(total_amount - paid_amount\), 0\) as total\s+FROM orders\s+WHERE payment_status IN/i.test(s)) {
       const total = store.orders
-        .filter(o => o.payment_status === 'Pending' || o.payment_status === 'Partial')
+        .filter(o => (o.payment_status === 'Pending' || o.payment_status === 'Partial') && o.delivery_status !== 'Cancelled')
         .reduce((sum, o) => sum + Math.max(0, (o.total_amount || 0) - (o.paid_amount || 0)), 0);
       return { total };
     }
@@ -749,7 +783,7 @@ class Statement {
     if (/SELECT\s+COALESCE\(\(SELECT SUM\(total_amount - paid_amount\).*as pending/is.test(s)) {
       const custId = Number(params[0]);
       const orderPending = store.orders
-        .filter(o => o.customer_id === custId && o.payment_status !== 'Paid')
+        .filter(o => o.customer_id === custId && o.payment_status !== 'Paid' && o.delivery_status !== 'Cancelled')
         .reduce((acc, o) => acc + Math.max(0, (o.total_amount || 0) - (o.paid_amount || 0)), 0);
       const waterPending = store.water_entries
         .filter(w => w.customer_id === custId && w.payment_status === 'Pending')
@@ -757,11 +791,12 @@ class Statement {
       return { pending: orderPending + waterPending };
     }
 
-    // Units sold stats for a product
+    // Units sold stats for a product (excluding cancelled orders)
     if (/SELECT COALESCE\(SUM\(quantity\), 0\) as total_sold FROM order_items oi/i.test(s)) {
       const prodId = Number(params[0]);
+      const cancelledOrderIds = new Set(store.orders.filter(o => o.delivery_status === 'Cancelled').map(o => o.id));
       const total_sold = store.order_items
-        .filter(oi => oi.product_id === prodId)
+        .filter(oi => oi.product_id === prodId && !cancelledOrderIds.has(oi.order_id))
         .reduce((acc, oi) => acc + (oi.quantity || 0), 0);
       return { total_sold };
     }
@@ -810,118 +845,7 @@ class Statement {
     }
     const s = this.sql;
 
-    // 1. Customers listing
-    if (/FROM customers c/i.test(s)) {
-      let list = [...store.customers];
-      
-      // Check for type filter
-      if (/c\.customer_type = \?/i.test(s)) {
-        const typeParam = params.find(p => ['Shop', 'Restaurant', 'Office', 'Hotel', 'Home', 'Other'].includes(p));
-        if (typeParam) list = list.filter(c => c.customer_type === typeParam);
-      }
-
-      // Check for search filter
-      if (/c\.name LIKE \?/i.test(s)) {
-        const searchRaw = params.find(p => typeof p === 'string' && p.startsWith('%') && p.endsWith('%'));
-        if (searchRaw) {
-          const term = searchRaw.slice(1, -1).toLowerCase();
-          list = list.filter(c => 
-            (c.name && c.name.toLowerCase().includes(term)) ||
-            (c.business_name && c.business_name.toLowerCase().includes(term)) ||
-            (c.phone && c.phone.includes(term)) ||
-            (c.address && c.address.toLowerCase().includes(term))
-          );
-        }
-      }
-
-      return list.map(c => {
-        const custOrders = store.orders.filter(o => o.customer_id === c.id && o.delivery_status !== 'Cancelled');
-        const custWater = store.water_entries.filter(w => w.customer_id === c.id);
-
-        const total_orders = custOrders.length;
-        const totalOrderSales = custOrders.reduce((acc, o) => acc + (o.total_amount || 0), 0);
-        const totalWaterSales = custWater.reduce((acc, w) => acc + (w.total_amount || 0), 0);
-        const total_amount = totalOrderSales + totalWaterSales;
-
-        const orderPending = store.orders
-          .filter(o => o.customer_id === c.id && o.payment_status !== 'Paid')
-          .reduce((acc, o) => acc + Math.max(0, (o.total_amount || 0) - (o.paid_amount || 0)), 0);
-        const waterPending = custWater
-          .filter(w => w.payment_status === 'Pending')
-          .reduce((acc, w) => acc + (w.total_amount || 0), 0);
-        const balance_pending = orderPending + waterPending;
-
-        const lastOrder = custOrders.sort((a, b) => (b.order_date || '').localeCompare(a.order_date || ''))[0];
-        const lastWater = custWater.sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
-
-        return {
-          ...c,
-          total_orders,
-          total_amount,
-          balance_pending,
-          last_order_date: lastOrder ? lastOrder.order_date : null,
-          last_water_date: lastWater ? lastWater.date : null
-        };
-      });
-    }
-
-    // 2. Products listing
-    if (/SELECT \* FROM products/i.test(s)) {
-      let list = [...store.products];
-      if (/category = \?/i.test(s)) {
-        const cat = params[0];
-        list = list.filter(p => p.category === cat);
-      }
-      if (/active = 1/i.test(s)) {
-        list = list.filter(p => p.active === 1);
-      }
-      if (/stock <= minimum_stock/i.test(s)) {
-        list = list.filter(p => p.stock <= p.minimum_stock);
-      }
-      return list;
-    }
-
-    // 3. Low stock products
-    if (/SELECT id, name, category, size, stock, minimum_stock\s+FROM products\s+WHERE stock <= minimum_stock/i.test(s)) {
-      return store.products.filter(p => p.active === 1 && p.stock <= p.minimum_stock);
-    }
-
-    // 4. Water entries listing
-    if (/FROM water_entries w/i.test(s)) {
-      let list = [...store.water_entries];
-
-      // Filters
-      if (/w\.date = \?/i.test(s)) {
-        const d = params[0];
-        list = list.filter(w => w.date === d);
-      }
-      if (/w\.customer_id = \?/i.test(s)) {
-        const cid = Number(params[0]);
-        list = list.filter(w => w.customer_id === cid);
-      }
-      if (/strftime\('%Y-%m', w\.date\) = \?/i.test(s)) {
-        const m = params[0];
-        list = list.filter(w => (w.date || '').slice(0, 7) === m);
-      }
-
-      list.sort((a, b) => (b.date + ' ' + (b.time || '')).localeCompare(a.date + ' ' + (a.time || '')));
-
-      return list.map(w => {
-        const cust = store.customers.find(c => c.id === w.customer_id) || {};
-        const prod = store.products.find(p => p.id === w.product_id) || {};
-        return {
-          ...w,
-          customer_name: cust.name || '',
-          business_name: cust.business_name || '',
-          customer_phone: cust.phone || '',
-          customer_address: cust.address || '',
-          product_name: prod.name || '20L Water Jar',
-          product_size: prod.size || '20L'
-        };
-      });
-    }
-
-    // 5. Customer monthly water summary
+    // 1. Customer monthly water summary (check before generic FROM customers c)
     if (/SELECT\s+c\.id as customer_id.*FROM customers c\s+JOIN water_entries w/is.test(s)) {
       const month = params[0] || new Date().toISOString().slice(0, 7);
       const entries = store.water_entries.filter(w => (w.date || '').slice(0, 7) === month);
@@ -959,7 +883,121 @@ class Statement {
       })).sort((a, b) => b.total_water_units - a.total_water_units);
     }
 
-    // 6. Recent orders preview
+    // 2. Customers listing (also serves GET /api/payments pendingCustomers query)
+    if (/FROM customers c/i.test(s)) {
+      let list = [...store.customers];
+      
+      // Check for type filter
+      if (/c\.customer_type = \?/i.test(s)) {
+        const typeParam = params.find(p => ['Shop', 'Restaurant', 'Office', 'Hotel', 'Home', 'Other'].includes(p));
+        if (typeParam) list = list.filter(c => c.customer_type === typeParam);
+      }
+
+      // Check for search filter
+      if (/c\.name LIKE \?/i.test(s)) {
+        const searchRaw = params.find(p => typeof p === 'string' && p.startsWith('%') && p.endsWith('%'));
+        if (searchRaw) {
+          const term = searchRaw.slice(1, -1).toLowerCase();
+          list = list.filter(c => 
+            (c.name && c.name.toLowerCase().includes(term)) ||
+            (c.business_name && c.business_name.toLowerCase().includes(term)) ||
+            (c.phone && c.phone.includes(term)) ||
+            (c.address && c.address.toLowerCase().includes(term))
+          );
+        }
+      }
+
+      return list.map(c => {
+        const custOrders = store.orders.filter(o => o.customer_id === c.id && o.delivery_status !== 'Cancelled');
+        const custWater = store.water_entries.filter(w => w.customer_id === c.id);
+
+        const total_orders = custOrders.length;
+        const totalOrderSales = custOrders.reduce((acc, o) => acc + (o.total_amount || 0), 0);
+        const totalWaterSales = custWater.reduce((acc, w) => acc + (w.total_amount || 0), 0);
+        const total_amount = totalOrderSales + totalWaterSales;
+
+        const orderPending = store.orders
+          .filter(o => o.customer_id === c.id && o.payment_status !== 'Paid' && o.delivery_status !== 'Cancelled')
+          .reduce((acc, o) => acc + Math.max(0, (o.total_amount || 0) - (o.paid_amount || 0)), 0);
+        const waterPending = custWater
+          .filter(w => w.payment_status === 'Pending')
+          .reduce((acc, w) => acc + (w.total_amount || 0), 0);
+        const balance_pending = orderPending + waterPending;
+
+        const lastOrder = [...custOrders].sort((a, b) => (b.order_date || '').localeCompare(a.order_date || ''))[0];
+        const lastWater = [...custWater].sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
+
+        return {
+          ...c,
+          customer_id: c.id,
+          customer_name: c.name,
+          total_orders,
+          total_amount,
+          balance_pending,
+          total_pending: balance_pending,
+          last_order_date: lastOrder ? lastOrder.order_date : null,
+          last_water_date: lastWater ? lastWater.date : null
+        };
+      });
+    }
+
+    // 3. Products listing
+    if (/SELECT \* FROM products/i.test(s)) {
+      let list = [...store.products];
+      if (/category = \?/i.test(s)) {
+        const cat = params[0];
+        list = list.filter(p => p.category === cat);
+      }
+      if (/active = 1/i.test(s)) {
+        list = list.filter(p => p.active === 1);
+      }
+      if (/stock <= minimum_stock/i.test(s)) {
+        list = list.filter(p => p.stock <= p.minimum_stock);
+      }
+      return list;
+    }
+
+    // 4. Low stock products
+    if (/SELECT id, name, category, size, stock, minimum_stock\s+FROM products\s+WHERE stock <= minimum_stock/i.test(s)) {
+      return store.products.filter(p => p.active === 1 && p.stock <= p.minimum_stock);
+    }
+
+    // 5. Water entries listing
+    if (/FROM water_entries w/i.test(s)) {
+      let list = [...store.water_entries];
+      let pIdx = 0;
+
+      if (/w\.date = \?/i.test(s)) {
+        const d = params[pIdx++];
+        list = list.filter(w => w.date === d);
+      }
+      if (/w\.customer_id = \?/i.test(s)) {
+        const cid = Number(params[pIdx++]);
+        list = list.filter(w => w.customer_id === cid);
+      }
+      if (/strftime\('%Y-%m', w\.date\) = \?/i.test(s)) {
+        const m = params[pIdx++];
+        list = list.filter(w => (w.date || '').slice(0, 7) === m);
+      }
+
+      list.sort((a, b) => (b.date + ' ' + (b.time || '')).localeCompare(a.date + ' ' + (a.time || '')));
+
+      return list.map(w => {
+        const cust = store.customers.find(c => c.id === w.customer_id) || {};
+        const prod = store.products.find(p => p.id === w.product_id) || {};
+        return {
+          ...w,
+          customer_name: cust.name || '',
+          business_name: cust.business_name || '',
+          customer_phone: cust.phone || '',
+          customer_address: cust.address || '',
+          product_name: prod.name || '20L Water Jar',
+          product_size: prod.size || '20L'
+        };
+      });
+    }
+
+    // 6. Recent orders preview (Dashboard)
     if (/FROM orders o\s+JOIN customers c.*LIMIT/is.test(s)) {
       const sorted = [...store.orders].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).slice(0, 6);
       return sorted.map(o => {
@@ -969,6 +1007,80 @@ class Statement {
           customer_name: c.name || '',
           business_name: c.business_name || '',
           customer_phone: c.phone || ''
+        };
+      });
+    }
+
+    // 6b. Full orders listing with customer & delivery join and filters (GET /api/orders)
+    if (/FROM orders o\s+JOIN customers c/is.test(s)) {
+      let list = [...store.orders];
+      let pIdx = 0;
+
+      if (/o\.customer_id = \?/i.test(s)) {
+        const cid = Number(params[pIdx++]);
+        list = list.filter(o => o.customer_id === cid);
+      }
+      if (/o\.delivery_status = \?/i.test(s)) {
+        const dst = params[pIdx++];
+        list = list.filter(o => o.delivery_status === dst);
+      }
+      if (/o\.payment_status = \?/i.test(s)) {
+        const pst = params[pIdx++];
+        list = list.filter(o => o.payment_status === pst);
+      }
+      if (/date\(o\.order_date\) = date\('now'\)/i.test(s)) {
+        const today = new Date().toISOString().slice(0, 10);
+        list = list.filter(o => (o.order_date || o.created_at || '').slice(0, 10) === today);
+      } else if (/date\(o\.order_date\) = \?/i.test(s)) {
+        const targetDate = params[pIdx++];
+        list = list.filter(o => (o.order_date || o.created_at || '').slice(0, 10) === targetDate);
+      } else if (/strftime\('%Y-%m', o\.order_date\) = strftime\('%Y-%m', 'now'\)/i.test(s)) {
+        const thisMonth = new Date().toISOString().slice(0, 7);
+        list = list.filter(o => (o.order_date || o.created_at || '').slice(0, 7) === thisMonth);
+      } else if (/date\(o\.order_date\) >= \? AND date\(o\.order_date\) <= \?/i.test(s)) {
+        const startD = params[pIdx++];
+        const endD = params[pIdx++];
+        list = list.filter(o => {
+          const d = (o.order_date || o.created_at || '').slice(0, 10);
+          return d >= startD && d <= endD;
+        });
+      } else if (/date\(o\.order_date\) >= \?/i.test(s)) {
+        const startD = params[pIdx++];
+        list = list.filter(o => (o.order_date || o.created_at || '').slice(0, 10) >= startD);
+      }
+
+      if (/o\.order_number LIKE \?/i.test(s)) {
+        const searchRaw = params[pIdx] || '';
+        const term = String(searchRaw).replace(/^%|%$/g, '').toLowerCase();
+        if (term) {
+          list = list.filter(o => {
+            const c = store.customers.find(cust => cust.id === o.customer_id) || {};
+            return (
+              (o.order_number && o.order_number.toLowerCase().includes(term)) ||
+              (c.name && c.name.toLowerCase().includes(term)) ||
+              (c.business_name && c.business_name.toLowerCase().includes(term)) ||
+              (c.phone && c.phone.includes(term)) ||
+              (o.delivery_address && o.delivery_address.toLowerCase().includes(term))
+            );
+          });
+        }
+      }
+
+      list.sort((a, b) => (b.order_date || b.created_at || '').localeCompare(a.order_date || a.created_at || ''));
+
+      return list.map(o => {
+        const c = store.customers.find(cust => cust.id === o.customer_id) || {};
+        const d = store.deliveries.find(del => del.order_id === o.id) || {};
+        return {
+          ...o,
+          customer_name: c.name || '',
+          business_name: c.business_name || '',
+          customer_phone: c.phone || '',
+          customer_whatsapp: c.whatsapp_number || c.phone || '',
+          customer_address: c.address || '',
+          delivery_status_info: d.status || o.delivery_status,
+          route_sequence: d.route_sequence || 0,
+          driver_notes: d.driver_notes || ''
         };
       });
     }
@@ -996,7 +1108,36 @@ class Statement {
       });
     }
 
-    // 9. Payments for specific customer
+    // 9. Payments with customer & order joins (GET /api/payments)
+    if (/FROM payments p\s+JOIN customers c/is.test(s)) {
+      let list = [...store.payments];
+      let pIdx = 0;
+
+      if (/p\.customer_id = \?/i.test(s)) {
+        const cid = Number(params[pIdx++]);
+        list = list.filter(p => p.customer_id === cid);
+      }
+      if (/p\.payment_mode = \?/i.test(s)) {
+        const mode = params[pIdx++];
+        list = list.filter(p => p.payment_mode === mode);
+      }
+
+      list.sort((a, b) => (b.payment_date || b.created_at || '').localeCompare(a.payment_date || a.created_at || ''));
+
+      return list.map(p => {
+        const c = store.customers.find(cust => cust.id === p.customer_id) || {};
+        const o = p.order_id ? store.orders.find(ord => ord.id === p.order_id) : null;
+        return {
+          ...p,
+          customer_name: c.name || '',
+          business_name: c.business_name || '',
+          customer_phone: c.phone || '',
+          order_number: o ? o.order_number : null
+        };
+      });
+    }
+
+    // 9b. Payments for specific customer
     if (/SELECT \* FROM payments\s+WHERE customer_id = \?/i.test(s)) {
       const custId = Number(params[0]);
       return store.payments.filter(p => p.customer_id === custId).sort((a, b) => (b.payment_date || '').localeCompare(a.payment_date || ''));
@@ -1031,6 +1172,9 @@ class Statement {
     // 11. Deliveries list
     if (/FROM deliveries d/i.test(s)) {
       let list = [...store.deliveries];
+      if (/d\.status = \?/i.test(s) && params[0]) {
+        list = list.filter(d => d.status === params[0]);
+      }
       list.sort((a, b) => (a.route_sequence || 0) - (b.route_sequence || 0));
       return list.map(d => {
         const c = store.customers.find(cust => cust.id === d.customer_id) || {};
@@ -1046,10 +1190,17 @@ class Statement {
           paid_amount: o.paid_amount || 0,
           payment_status: o.payment_status || 'Pending',
           order_number: o.order_number || '',
+          order_date: o.order_date || d.created_at,
           order_items: items,
           special_instructions: o.special_instructions || ''
         };
       });
+    }
+
+    // 12. Order items joined with orders (reports product-wise)
+    if (/FROM order_items oi\s+JOIN orders o/is.test(s)) {
+      const cancelledIds = new Set(store.orders.filter(o => o.delivery_status === 'Cancelled').map(o => o.id));
+      return store.order_items.filter(oi => !cancelledIds.has(oi.order_id));
     }
 
     // Default return all for raw table requests

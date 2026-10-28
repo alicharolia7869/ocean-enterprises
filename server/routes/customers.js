@@ -4,13 +4,19 @@ const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
 
+function toIsoDateString(val) {
+  if (!val) return '';
+  if (val instanceof Date) return val.toISOString();
+  return String(val);
+}
+
 // GET /api/customers - List all customers with computed financial metrics
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const { search, type } = req.query;
     let query = `
       SELECT c.*,
-        (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) as total_orders,
+        (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id AND o.delivery_status != 'Cancelled') as total_orders,
         (
           COALESCE((SELECT SUM(total_amount) FROM orders o WHERE o.customer_id = c.id AND o.delivery_status != 'Cancelled'), 0) +
           COALESCE((SELECT SUM(total_amount) FROM water_entries w WHERE w.customer_id = c.id), 0)
@@ -116,7 +122,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
     const monthsMap = {};
 
     (waterEntries || []).forEach(w => {
-      const m = (w.date ? String(w.date) : '').slice(0, 7);
+      const m = toIsoDateString(w.date).slice(0, 7);
       if (!m) return;
       if (!monthsMap[m]) {
         monthsMap[m] = { month: m, total_water_units: 0, total_orders: 0, total_sales: 0, total_paid: 0, total_pending: 0 };
@@ -134,7 +140,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
 
     (parsedOrders || []).forEach(o => {
       if (o.delivery_status === 'Cancelled') return;
-      const m = (o.order_date ? String(o.order_date) : '').slice(0, 7);
+      const m = toIsoDateString(o.order_date || o.created_at).slice(0, 7);
       if (!m) return;
       if (!monthsMap[m]) {
         monthsMap[m] = { month: m, total_water_units: 0, total_orders: 0, total_sales: 0, total_paid: 0, total_pending: 0 };

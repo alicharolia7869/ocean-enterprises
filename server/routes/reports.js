@@ -4,6 +4,12 @@ const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
 
+function toIsoDateString(val) {
+  if (!val) return '';
+  if (val instanceof Date) return val.toISOString();
+  return String(val);
+}
+
 // GET /api/reports/sales
 router.get('/sales', authMiddleware, async (req, res) => {
   try {
@@ -28,14 +34,14 @@ router.get('/sales', authMiddleware, async (req, res) => {
 
         const orderSales = (orders || [])
           .filter(o => {
-            const date = (o.order_date ? String(o.order_date) : (o.created_at ? String(o.created_at) : '')).slice(0, 10);
+            const date = toIsoDateString(o.order_date || o.created_at).slice(0, 10);
             return date >= startStr && date <= endStr;
           })
           .reduce((sum, o) => sum + (parseFloat(o.total_amount) || 0), 0);
 
         const waterSales = (waterEntries || [])
           .filter(w => {
-            const date = (w.date ? String(w.date) : '').slice(0, 10);
+            const date = toIsoDateString(w.date).slice(0, 10);
             return date >= startStr && date <= endStr;
           })
           .reduce((sum, w) => sum + (parseFloat(w.total_amount) || 0), 0);
@@ -55,11 +61,11 @@ router.get('/sales', authMiddleware, async (req, res) => {
         const monthLabel = d.toLocaleString('default', { month: 'short', year: 'numeric' });
 
         const orderSales = (orders || [])
-          .filter(o => (o.order_date ? String(o.order_date) : (o.created_at ? String(o.created_at) : '')).slice(0, 7) === monthKey)
+          .filter(o => toIsoDateString(o.order_date || o.created_at).slice(0, 7) === monthKey)
           .reduce((sum, o) => sum + (parseFloat(o.total_amount) || 0), 0);
 
         const waterSales = (waterEntries || [])
-          .filter(w => (w.date ? String(w.date) : '').slice(0, 7) === monthKey)
+          .filter(w => toIsoDateString(w.date).slice(0, 7) === monthKey)
           .reduce((sum, w) => sum + (parseFloat(w.total_amount) || 0), 0);
 
         result.push({
@@ -79,10 +85,10 @@ router.get('/sales', authMiddleware, async (req, res) => {
         const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
         const orderSales = (orders || [])
-          .filter(o => (o.order_date ? String(o.order_date) : (o.created_at ? String(o.created_at) : '')).slice(0, 10) === dateStr)
+          .filter(o => toIsoDateString(o.order_date || o.created_at).slice(0, 10) === dateStr)
           .reduce((sum, o) => sum + (parseFloat(o.total_amount) || 0), 0);
 
-        const dailyWater = (waterEntries || []).filter(w => (w.date ? String(w.date) : '').slice(0, 10) === dateStr);
+        const dailyWater = (waterEntries || []).filter(w => toIsoDateString(w.date).slice(0, 10) === dateStr);
         const waterSales = dailyWater.reduce((sum, w) => sum + (parseFloat(w.total_amount) || 0), 0);
         const waterUnits = dailyWater.reduce((sum, w) => sum + (parseInt(w.quantity, 10) || 0), 0);
 
@@ -107,7 +113,7 @@ router.get('/sales', authMiddleware, async (req, res) => {
 // GET /api/reports/customer-wise
 router.get('/customer-wise', authMiddleware, async (req, res) => {
   try {
-    const customers = await db.prepare('SELECT id, name, business_name, phone FROM customers ORDER BY business_name ASC').all();
+    const customers = await db.prepare('SELECT id, name, business_name, phone, customer_type FROM customers ORDER BY business_name ASC').all();
     const allOrders = await db.prepare("SELECT customer_id, total_amount, paid_amount FROM orders WHERE delivery_status != 'Cancelled'").all();
     const allWater = await db.prepare("SELECT customer_id, quantity, total_amount, payment_status FROM water_entries").all();
 
@@ -126,11 +132,15 @@ router.get('/customer-wise', authMiddleware, async (req, res) => {
       const pending = Math.max(0, totalSales - totalPaid);
 
       return {
+        id: c.id,
         customer_id: c.id,
         name: c.name,
         business_name: c.business_name,
         phone: c.phone,
+        customer_type: c.customer_type || 'Shop',
+        orders_count: orders.length,
         total_orders: orders.length,
+        water_units: totalWaterUnits,
         total_water_units: totalWaterUnits,
         total_sales: Math.round(totalSales),
         total_paid: Math.round(totalPaid),

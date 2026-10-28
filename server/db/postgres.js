@@ -1,18 +1,25 @@
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
 const fs = require('fs');
 const path = require('path');
 
+// Keep PostgreSQL DATE columns (OID 1082) as 'YYYY-MM-DD' strings so date slicing works consistently
+types.setTypeParser(1082, (val) => val);
+
 let pool = null;
 
+function getConnectionString() {
+  return process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
+}
+
 function isPostgresConfigured() {
-  const dbUrl = process.env.DATABASE_URL;
+  const dbUrl = getConnectionString();
   return Boolean(dbUrl && (dbUrl.startsWith('postgresql://') || dbUrl.startsWith('postgres://')));
 }
 
 function getPool() {
   if (pool) return pool;
 
-  const connectionString = process.env.DATABASE_URL;
+  const connectionString = getConnectionString();
   if (!connectionString) {
     return null;
   }
@@ -35,8 +42,21 @@ function getPool() {
 }
 
 /**
+ * Normalize row values so Date objects from TIMESTAMPTZ columns serialize as ISO strings
+ * matching the local JSON store format.
+ */
+function normalizeRow(row) {
+  if (!row || typeof row !== 'object') return row;
+  const out = {};
+  for (const [k, v] of Object.entries(row)) {
+    out[k] = v instanceof Date ? v.toISOString() : v;
+  }
+  return out;
+}
+
+/**
  * Translates SQLite style "?" placeholders to PostgreSQL "$1, $2, $3"
- * and translates dialect-specific functions like date('now') to CURRENT_DATE.
+ * and translates dialect-specific functions like date('now'), MAX(0, ...), and strftime.
  */
 function normalizeQuery(sql) {
   let paramIndex = 0;
@@ -45,16 +65,18 @@ function normalizeQuery(sql) {
     .replace(/INSERT\s+OR\s+REPLACE\s+INTO\s+business_settings\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/gi, (match, cols, vals) => {
       return `INSERT INTO business_settings (${cols}) VALUES (${vals}) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
     })
+    // Translate SQLite scalar MAX(0, expr) to PostgreSQL GREATEST(0, expr)
+    .replace(/\bMAX\s*\(\s*0\s*,/gi, 'GREATEST(0,')
+    // Case-insensitive LIKE in PostgreSQL
+    .replace(/\bLIKE\b/gi, 'ILIKE')
     // Replace ? with $1, $2, etc.
     .replace(/\?/g, () => `$${++paramIndex}`)
     // Date/time dialect adaptation
     .replace(/date\('now'\)/gi, 'CURRENT_DATE')
     .replace(/datetime\('now'\)/gi, 'CURRENT_TIMESTAMP')
     .replace(/date\(now\(\)\)/gi, 'CURRENT_DATE')
-    .replace(/strftime\('%Y-%m',\s*date\)/gi, "TO_CHAR(date, 'YYYY-MM')")
-    .replace(/strftime\('%Y-%m',\s*order_date\)/gi, "TO_CHAR(order_date, 'YYYY-MM')")
     .replace(/strftime\('%Y-%m',\s*'now'\)/gi, "TO_CHAR(CURRENT_DATE, 'YYYY-MM')")
-    .replace(/strftime\('%Y-%m',\s*w\.date\)/gi, "TO_CHAR(w.date, 'YYYY-MM')");
+    .replace(/strftime\('%Y-%m',\s*([^)]+)\)/gi, "TO_CHAR($1, 'YYYY-MM')");
 
   // If INSERT statement does not have RETURNING, append appropriate returning column
   if (/^\s*INSERT\s+INTO\s+/i.test(normalized) && !/RETURNING/i.test(normalized)) {
@@ -78,12 +100,12 @@ async function query(sql, params = []) {
 
 async function getOne(sql, params = []) {
   const result = await query(sql, params);
-  return result.rows[0] || null;
+  return result.rows[0] ? normalizeRow(result.rows[0]) : null;
 }
 
 async function getAll(sql, params = []) {
   const result = await query(sql, params);
-  return result.rows;
+  return (result.rows || []).map(normalizeRow);
 }
 
 async function run(sql, params = []) {

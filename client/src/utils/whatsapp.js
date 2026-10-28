@@ -5,11 +5,54 @@
  */
 export function formatWhatsAppPhone(phone) {
   if (!phone) return '';
-  const digits = phone.replace(/[^0-9]/g, '');
+  const digits = String(phone).replace(/[^0-9]/g, '');
   if (digits.length === 10) {
     return `91${digits}`;
   }
   return digits;
+}
+
+/**
+ * Resolve phone number from either a customer record or a joined order/delivery object
+ */
+function resolveWhatsAppPhone(customer, order) {
+  return (
+    customer?.whatsapp_number ||
+    customer?.customer_whatsapp ||
+    customer?.phone ||
+    customer?.customer_phone ||
+    order?.customer_whatsapp ||
+    order?.customer_phone ||
+    ''
+  );
+}
+
+/**
+ * Resolve customer display name from either a customer record or a joined order/delivery object
+ */
+function resolveCustomerName(customer, order, fallback = 'Customer') {
+  return (
+    customer?.business_name ||
+    customer?.name ||
+    customer?.customer_name ||
+    order?.business_name ||
+    order?.customer_name ||
+    fallback
+  );
+}
+
+/**
+ * Resolve delivery address from either an order/delivery or customer object
+ */
+function resolveDeliveryAddress(customer, order, fallback = 'Standard location') {
+  return (
+    order?.delivery_address ||
+    order?.customer_address ||
+    customer?.address ||
+    customer?.customer_address ||
+    customer?.delivery_address ||
+    fallback
+  );
 }
 
 /**
@@ -28,12 +71,17 @@ export function openWhatsApp(phone, message) {
  * Template 1: Order Confirmation
  */
 export function sendOrderConfirmation(customer, order) {
-  const itemsText = (order.items || [])
-    .map(it => `• ${it.quantity} x ${it.product_name} (₹${it.subtotal})`)
+  const items = order?.items || order?.order_items || [];
+  const itemsText = items
+    .map(it => `• ${it.quantity} x ${it.product_name} (₹${it.subtotal ?? (it.quantity * (it.price || 0))})`)
     .join('\n');
 
+  const customerName = resolveCustomerName(customer, order, 'Valued Customer');
+  const address = resolveDeliveryAddress(customer, order, 'Standard location');
+  const phone = resolveWhatsAppPhone(customer, order);
+
   const text = 
-`Hello ${customer.name || customer.business_name || 'Valued Customer'},
+`Hello ${customerName},
 
 Your Ocean Enterprises order *#${order.order_number}* has been confirmed! 🌊
 
@@ -42,23 +90,27 @@ ${itemsText || 'Standard items'}
 
 *Total Amount:* ₹${order.total_amount}
 *Payment Status:* ${order.payment_status}
-*Delivery Address:* ${order.delivery_address || customer.address || 'Standard location'}
+*Delivery Address:* ${address}
 
 Thank you for choosing Ocean Enterprises! Pure Water & Refreshing Drinks Express Distribution.`;
 
-  openWhatsApp(customer.whatsapp_number || customer.phone, text);
+  openWhatsApp(phone, text);
 }
 
 /**
  * Template 2: Delivery Notification (Out for Delivery)
  */
 export function sendDeliveryNotification(customer, order) {
+  const customerName = resolveCustomerName(customer, order, 'Customer');
+  const address = resolveDeliveryAddress(customer, order, 'Standard location');
+  const phone = resolveWhatsAppPhone(customer, order);
+
   const text = 
-`Hello ${customer.name || customer.business_name || 'Customer'},
+`Hello ${customerName},
 
 🚚 Your Ocean Enterprises order *#${order.order_number}* is *OUT FOR DELIVERY* and will reach you shortly!
 
-*Delivery Address:* ${order.delivery_address || customer.address}
+*Delivery Address:* ${address}
 *Total Amount:* ₹${order.total_amount} (${order.payment_status === 'Paid' ? 'Paid Online' : 'Cash/UPI Due: ₹' + (order.total_amount - (order.paid_amount || 0))})
 
 Please ensure someone is available at the counter to receive the shipment.
@@ -66,15 +118,18 @@ Please ensure someone is available at the counter to receive the shipment.
 Thank you!
 Ocean Enterprises`;
 
-  openWhatsApp(customer.whatsapp_number || customer.phone, text);
+  openWhatsApp(phone, text);
 }
 
 /**
  * Template 3: Order Delivered
  */
 export function sendOrderDelivered(customer, order) {
+  const customerName = resolveCustomerName(customer, order, 'Customer');
+  const phone = resolveWhatsAppPhone(customer, order);
+
   const text = 
-`Hello ${customer.name || customer.business_name || 'Customer'},
+`Hello ${customerName},
 
 ✅ Your order *#${order.order_number}* from *Ocean Enterprises* has been delivered successfully!
 
@@ -82,15 +137,18 @@ Thank you for your business! If you need empty water jars picked up or a refill 
 
 Have a wonderful day! 💧`;
 
-  openWhatsApp(customer.whatsapp_number || customer.phone, text);
+  openWhatsApp(phone, text);
 }
 
 /**
  * Template 4: Payment Reminder
  */
 export function sendPaymentReminder(customer, amountDue, upiId = 'oceanenterprises@okhdfcbank') {
+  const customerName = resolveCustomerName(customer, null, 'Customer');
+  const phone = resolveWhatsAppPhone(customer, null);
+
   const text = 
-`Hello ${customer.name || customer.business_name || 'Customer'},
+`Hello ${customerName},
 
 Greetings from *Ocean Enterprises*! 🌊
 
@@ -105,7 +163,7 @@ If you have already made this payment, kindly ignore this message or send the pa
 Thank you for your cooperation!
 Ocean Enterprises`;
 
-  openWhatsApp(customer.whatsapp_number || customer.phone, text);
+  openWhatsApp(phone, text);
 }
 
 /**

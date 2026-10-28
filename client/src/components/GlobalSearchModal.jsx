@@ -21,6 +21,17 @@ export default function GlobalSearchModal({ isOpen, onClose, onSelectCustomer, o
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   const fetchAllData = async () => {
     try {
       setLoading(true);
@@ -95,16 +106,20 @@ export default function GlobalSearchModal({ isOpen, onClose, onSelectCustomer, o
               <X size={16} />
             </button>
           )}
-          <kbd style={{ 
-            background: '#f1f5f9', 
-            border: '1px solid #cbd5e1', 
-            borderRadius: '4px', 
-            padding: '1px 5px', 
-            fontSize: '11px', 
-            color: '#64748b', 
-            fontFamily: 'inherit',
-            flexShrink: 0
-          }}>
+          <kbd
+            onClick={onClose}
+            style={{ 
+              background: '#f1f5f9', 
+              border: '1px solid #cbd5e1', 
+              borderRadius: '4px', 
+              padding: '1px 5px', 
+              fontSize: '11px', 
+              color: '#64748b', 
+              fontFamily: 'inherit',
+              flexShrink: 0,
+              cursor: 'pointer'
+            }}
+          >
             ESC
           </kbd>
         </div>

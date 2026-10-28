@@ -152,6 +152,21 @@ test('2. Authentication & Security', async (t) => {
     assert.equal(res.data.user.role, 'admin');
     assert.equal(res.data.user.password_hash, undefined);
   });
+
+  await t.test('PUT /api/auth/change-password verifies current password and updates hash', async () => {
+    const res1 = await req('/api/auth/change-password', {
+      method: 'PUT',
+      body: JSON.stringify({ currentPassword: 'admin123', newPassword: 'newpassword123' })
+    });
+    assert.equal(res1.status, 200);
+
+    // Restore original password
+    const res2 = await req('/api/auth/change-password', {
+      method: 'PUT',
+      body: JSON.stringify({ currentPassword: 'newpassword123', newPassword: 'admin123' })
+    });
+    assert.equal(res2.status, 200);
+  });
 });
 
 test('3. Dashboard Operations', async (t) => {
@@ -379,6 +394,17 @@ test('7. Orders & WhatsApp Parsing', async (t) => {
     testOrderId = res.data.order.id;
   });
 
+  await t.test('GET /api/orders returns joined customer fields and supports filters', async () => {
+    const res = await req(`/api/orders?period=This%20Week&customerId=${testCustomerId}`);
+    assert.equal(res.status, 200);
+    assert.ok(Array.isArray(res.data.orders));
+    const found = res.data.orders.find(o => o.id === testOrderId);
+    assert.ok(found, 'Order must be returned for This Week filter');
+    assert.equal(found.customer_name, 'Verification Test Client Updated');
+    assert.equal(found.customer_phone, '03119999999');
+    assert.ok(Array.isArray(found.items) && found.items.length === 1);
+  });
+
   await t.test('Order appears in orders list with item details', async () => {
     const res = await req(`/api/orders/${testOrderId}`);
     assert.equal(res.status, 200);
@@ -395,6 +421,33 @@ test('7. Orders & WhatsApp Parsing', async (t) => {
     });
     assert.equal(res.status, 200);
     assert.equal(res.data.status, 'Delivered');
+  });
+
+  await t.test('Cancelled orders are excluded from customer pending balance and can be deleted', async () => {
+    const createRes = await req('/api/orders', {
+      method: 'POST',
+      body: JSON.stringify({
+        customer_id: testCustomerId,
+        items: [{ product_id: testProductId, quantity: 2, price: 250 }]
+      })
+    });
+    assert.equal(createRes.status, 201);
+    const tempOrderId = createRes.data.order.id;
+
+    // Cancel order
+    const cancelRes = await req(`/api/orders/${tempOrderId}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ status: 'Cancelled' })
+    });
+    assert.equal(cancelRes.status, 200);
+
+    // Check customer pending balance is still 2250 (1250 water + 1000 active order), not 2750
+    const custRes = await req(`/api/customers/${testCustomerId}`);
+    assert.equal(custRes.data.customer.pending_balance, 2250);
+
+    // Delete temporary order
+    const delRes = await req(`/api/orders/${tempOrderId}`, { method: 'DELETE' });
+    assert.equal(delRes.status, 200);
   });
 });
 
@@ -423,6 +476,15 @@ test('8. Deliveries & Route Dispatch', async (t) => {
 });
 
 test('9. Payment Allocation & Customer Balance', async (t) => {
+  await t.test('GET /api/payments lists pendingCustomers before full settlement', async () => {
+    const listRes = await req('/api/payments');
+    assert.equal(listRes.status, 200);
+    assert.ok(Array.isArray(listRes.data.pendingCustomers));
+    const pendingCust = listRes.data.pendingCustomers.find(c => c.customer_id === testCustomerId);
+    assert.ok(pendingCust, 'Test customer with unpaid balance must appear in pendingCustomers');
+    assert.equal(pendingCust.total_pending, 2250);
+  });
+
   await t.test('Record payment allocated to test order', async () => {
     const res = await req('/api/payments', {
       method: 'POST',
@@ -468,10 +530,16 @@ test('10. Business Reports & Analytics', async (t) => {
     assert.ok(Array.isArray(res.data.salesData));
   });
 
-  await t.test('GET /api/reports/customer-wise returns customer ledgers', async () => {
+  await t.test('GET /api/reports/customer-wise returns customer ledgers with UI and API fields', async () => {
     const res = await req('/api/reports/customer-wise');
     assert.equal(res.status, 200);
     assert.ok(Array.isArray(res.data.customerWise));
+    const custReport = res.data.customerWise.find(c => c.customer_id === testCustomerId);
+    assert.ok(custReport);
+    assert.equal(custReport.id, testCustomerId);
+    assert.equal(custReport.customer_type, 'Shop');
+    assert.equal(custReport.water_units, 5);
+    assert.equal(custReport.orders_count, 1);
   });
 
   await t.test('GET /api/reports/product-wise returns product sales performance', async () => {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Navigation from './components/Navigation';
 import GlobalSearchModal from './components/GlobalSearchModal';
@@ -24,6 +24,17 @@ function MainApp() {
   const [openNewOrderModal, setOpenNewOrderModal] = useState(false);
   const [selectedCustomerIdForView, setSelectedCustomerIdForView] = useState(null);
 
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   if (loading) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0c4a6e', color: 'white' }}>
@@ -45,7 +56,7 @@ function MainApp() {
     setActiveTab('customers');
   };
 
-  const handleSelectOrderFromSearch = (o) => {
+  const handleSelectOrderFromSearch = () => {
     setActiveTab('orders');
   };
 

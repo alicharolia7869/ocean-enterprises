@@ -64,8 +64,8 @@ router.get('/me', authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/auth/change-password
-router.post('/change-password', authMiddleware, async (req, res) => {
+// POST & PUT /api/auth/change-password
+const handleChangePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     if (!currentPassword || !newPassword || newPassword.length < 6) {
@@ -89,6 +89,9 @@ router.post('/change-password', authMiddleware, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Error changing password' });
   }
-});
+};
+
+router.post('/change-password', authMiddleware, handleChangePassword);
+router.put('/change-password', authMiddleware, handleChangePassword);
 
 module.exports = router;

@@ -37,7 +37,6 @@ router.get('/', authMiddleware, async (req, res) => {
     }
 
     const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10);
 
     if (filter === 'Today') {
       query += ` AND date(o.order_date) = date('now')`;
@@ -47,6 +46,12 @@ router.get('/', authMiddleware, async (req, res) => {
       const yStr = yesterday.toISOString().slice(0, 10);
       query += ` AND date(o.order_date) = ?`;
       params.push(yStr);
+    } else if (filter === 'This Week') {
+      const weekAgo = new Date(now);
+      weekAgo.setDate(weekAgo.getDate() - 6);
+      const wStr = weekAgo.toISOString().slice(0, 10);
+      query += ` AND date(o.order_date) >= ?`;
+      params.push(wStr);
     } else if (filter === 'This Month') {
       query += ` AND strftime('%Y-%m', o.order_date) = strftime('%Y-%m', 'now')`;
     } else if (startDate && endDate) {
@@ -132,7 +137,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
 // POST /api/orders - Create structured order
 router.post('/', authMiddleware, async (req, res) => {
   try {
-    const { customer_id, items, special_instructions, delivery_address, latitude, longitude, source, paid_amount, payment_mode } = req.body;
+    const { customer_id, items, special_instructions, notes, delivery_address, latitude, longitude, source, paid_amount, payment_mode } = req.body;
     if (!customer_id || !items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Customer and at least one item are required' });
     }
@@ -149,7 +154,8 @@ router.post('/', authMiddleware, async (req, res) => {
     for (const item of items) {
       const product = await db.prepare('SELECT * FROM products WHERE id = ?').get(item.product_id);
       const qty = parseInt(item.quantity, 10);
-      const price = item.price !== undefined ? parseFloat(item.price) : (product ? parseFloat(product.selling_price) : 0);
+      const rawPrice = item.price !== undefined ? item.price : item.unit_price;
+      const price = rawPrice !== undefined ? parseFloat(rawPrice) : (product ? parseFloat(product.selling_price) : 0);
       const subtotal = Math.round(qty * price);
 
       totalAmount += subtotal;
@@ -180,6 +186,7 @@ router.post('/', authMiddleware, async (req, res) => {
     const targetAddress = delivery_address || customer.address;
     const targetLat = latitude ? parseFloat(latitude) : (customer.latitude ? parseFloat(customer.latitude) : null);
     const targetLng = longitude ? parseFloat(longitude) : (customer.longitude ? parseFloat(customer.longitude) : null);
+    const instructions = special_instructions || notes || '';
 
     // Insert Order
     const insertOrder = db.prepare(`
@@ -197,7 +204,7 @@ router.post('/', authMiddleware, async (req, res) => {
       targetAddress,
       targetLat,
       targetLng,
-      special_instructions || '',
+      instructions,
       source || 'Manual'
     );
 
@@ -221,7 +228,7 @@ router.post('/', authMiddleware, async (req, res) => {
       INSERT INTO deliveries (order_id, customer_id, delivery_address, latitude, longitude, status, route_sequence, driver_notes)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    await insertDeliv.run(orderId, customer.id, targetAddress, targetLat, targetLng, 'New Order', nextSeq, special_instructions || '');
+    await insertDeliv.run(orderId, customer.id, targetAddress, targetLat, targetLng, 'New Order', nextSeq, instructions);
 
     // If initial payment recorded
     if (initialPaid > 0) {
@@ -379,7 +386,7 @@ router.post('/parse-whatsapp', authMiddleware, async (req, res) => {
       { key: 'guava', productMatch: p => p.name.includes('Guava') }
     ];
 
-    const segments = cleanText.split(/[\n,;\+]/).map(s => s.trim()).filter(Boolean);
+    const segments = cleanText.split(/[\n,;+]/).map(s => s.trim()).filter(Boolean);
 
     for (const segment of segments) {
       const segLower = segment.toLowerCase();

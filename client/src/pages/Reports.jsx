@@ -21,7 +21,7 @@ export default function Reports() {
   const [salesData, setSalesData] = useState([]);
   const [customerData, setCustomerData] = useState([]);
   const [productData, setProductData] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
 
   useEffect(() => {
     loadReport();
@@ -79,9 +79,9 @@ export default function Reports() {
       const rows = customerData.map(c => `
         <tr>
           <td>${c.business_name || c.name}</td>
-          <td>${c.customer_type}</td>
-          <td>${c.water_units} Jars</td>
-          <td>${c.orders_count}</td>
+          <td>${c.customer_type || 'Shop'}</td>
+          <td>${c.water_units ?? c.total_water_units ?? 0} Jars</td>
+          <td>${c.orders_count ?? c.total_orders ?? 0}</td>
           <td>₹${c.total_sales?.toLocaleString()}</td>
           <td style="color: red;">₹${c.total_pending?.toLocaleString()}</td>
         </tr>
@@ -275,14 +275,14 @@ export default function Reports() {
               </thead>
               <tbody>
                 {customerData.map(c => (
-                  <tr key={c.id}>
+                  <tr key={c.id ?? c.customer_id}>
                     <td>
                       <strong>{c.business_name || c.name}</strong>
                       <div style={{ fontSize: '11px', color: '#64748b' }}>📞 {c.phone}</div>
                     </td>
-                    <td>{c.customer_type}</td>
-                    <td><strong style={{ color: '#0284c7' }}>{c.water_units} Jars</strong></td>
-                    <td>{c.orders_count}</td>
+                    <td>{c.customer_type || 'Shop'}</td>
+                    <td><strong style={{ color: '#0284c7' }}>{c.water_units ?? c.total_water_units ?? 0} Jars</strong></td>
+                    <td>{c.orders_count ?? c.total_orders ?? 0}</td>
                     <td><strong>₹{c.total_sales?.toLocaleString()}</strong></td>
                     <td style={{ color: '#16a34a' }}>₹{c.total_paid?.toLocaleString()}</td>
                     <td style={{ color: c.total_pending > 0 ? '#e11d48' : '#64748b', fontWeight: '800' }}>

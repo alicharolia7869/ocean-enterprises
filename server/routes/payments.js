@@ -45,14 +45,15 @@ router.get('/', authMiddleware, async (req, res) => {
 
     const pendingCustomers = (customers || [])
       .map(c => {
-        const totalPending = Math.round(parseFloat(c.total_pending) || 0);
+        const totalPending = Math.round(parseFloat(c.total_pending ?? c.balance_pending) || 0);
         return {
-          customer_id: c.customer_id,
-          customer_name: c.customer_name,
+          customer_id: c.customer_id ?? c.id,
+          customer_name: c.customer_name ?? c.name,
           business_name: c.business_name,
           phone: c.phone,
           whatsapp_number: c.whatsapp_number || c.phone,
           totalPending,
+          total_pending: totalPending,
           hasPending: totalPending > 0
         };
       })

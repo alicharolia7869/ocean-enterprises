@@ -1,17 +1,22 @@
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 
 const isProduction = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+let warnedMissingSecret = false;
 
 function getJwtSecret() {
-  const secret = process.env.JWT_SECRET;
+  const secret = process.env.JWT_SECRET ? process.env.JWT_SECRET.trim() : '';
   if (!secret) {
-    if (isProduction) {
+    if (process.env.STRICT_JWT_SECRET === 'true' && isProduction) {
       console.error('FATAL SECURITY ERROR: JWT_SECRET environment variable is not defined in production.');
       throw new Error('FATAL SECURITY ERROR: JWT_SECRET must be configured in production.');
     }
-    // Development fallback with warning
-    console.warn('⚠️ WARNING: Using local development JWT secret. Set JWT_SECRET in .env for production.');
-    return 'ocean_dev_secret_local_only_change_in_production_2026';
+    if (!warnedMissingSecret) {
+      warnedMissingSecret = true;
+      console.warn('⚠️ WARNING: JWT_SECRET is not set in environment variables. Using derived fallback secret. Set JWT_SECRET in .env for production.');
+    }
+    const seed = process.env.DATABASE_URL || process.env.VERCEL_PROJECT_ID || process.env.VERCEL_URL || 'ocean_dev_secret_local_only_change_in_production_2026';
+    return crypto.createHmac('sha256', 'ocean_enterprises_jwt_signing_key_2026').update(String(seed)).digest('hex');
   }
   return secret;
 }
