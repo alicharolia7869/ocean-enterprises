@@ -2,11 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   MapPin, 
   Navigation as NavIcon, 
-  Truck, 
-  ExternalLink, 
-  Phone, 
   Layers,
-  ArrowRight,
   RotateCcw
 } from 'lucide-react';
 import { api } from '../services/api';
@@ -15,13 +11,8 @@ import { openGoogleMapsNavigation } from '../utils/maps';
 export default function DeliveryRoute() {
   const [deliveries, setDeliveries] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedStop, setSelectedStop] = useState(null);
   const mapRef = useRef(null);
   const leafletInstance = useRef(null);
-
-  useEffect(() => {
-    loadRouteDeliveries();
-  }, []);
 
   const loadRouteDeliveries = async () => {
     try {
@@ -36,6 +27,10 @@ export default function DeliveryRoute() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadRouteDeliveries();
+  }, []);
 
   useEffect(() => {
     if (loading || !mapRef.current) return;

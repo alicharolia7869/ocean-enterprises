@@ -1,8 +1,18 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const dotenv = require('dotenv');
 
-dotenv.config();
+if (process.env.NODE_ENV !== 'test') {
+  dotenv.config({
+    path: [
+      path.join(__dirname, '..', '..', '.env.local'),
+      path.join(__dirname, '..', '..', '.env')
+    ]
+  });
+} else {
+  dotenv.config();
+}
 
 const { isPostgresConfigured, getPool, runMigrations, transaction } = require('./postgres');
 
@@ -23,7 +33,7 @@ async function migrateData() {
   console.log('1️⃣ Running schema migrations...');
   await runMigrations();
 
-  // 2. Step 2: Load Source JSON Data
+  // 2. Step 2: Load Source JSON Data & Create Safety Backup
   const jsonPath = path.join(__dirname, '..', 'data', 'ocean_store.json');
   if (!fs.existsSync(jsonPath)) {
     console.warn(`⚠️ Source store not found at ${jsonPath}. Skipping data import.`);
@@ -31,7 +41,16 @@ async function migrateData() {
   }
 
   const raw = fs.readFileSync(jsonPath, 'utf8');
+  const backupPath = path.join(os.tmpdir(), `ocean_store_backup_${Date.now()}.json`);
+  try {
+    fs.writeFileSync(backupPath, raw, 'utf8');
+    console.log(`💾 Source store backed up safely to ${backupPath}`);
+  } catch (e) {
+    console.warn('⚠️ Could not write temp backup file:', e.message);
+  }
+
   const store = JSON.parse(raw);
+  const validWaterEntries = (store.water_entries || []).filter(w => w.customer_id && w.quantity && w.quantity > 0);
 
   const counts = {
     users: store.users?.length || 0,
@@ -39,9 +58,10 @@ async function migrateData() {
     products: store.products?.length || 0,
     orders: store.orders?.length || 0,
     order_items: store.order_items?.length || 0,
-    water_entries: store.water_entries?.length || 0,
+    water_entries: validWaterEntries.length,
     payments: store.payments?.length || 0,
-    deliveries: store.deliveries?.length || 0
+    deliveries: store.deliveries?.length || 0,
+    business_settings: Object.keys(store.business_settings || {}).length
   };
 
   console.log('2️⃣ Source JSON Records to migrate:');
@@ -67,7 +87,7 @@ async function migrateData() {
       await client.query(
         `INSERT INTO users (id, name, phone, email, password_hash, role, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
-         ON CONFLICT (email) DO NOTHING`,
+         ON CONFLICT (id) DO NOTHING`,
         [u.id, u.name, u.phone, (u.email || '').toLowerCase(), u.password_hash, u.role || 'admin', u.created_at || new Date()]
       );
     }
@@ -113,8 +133,7 @@ async function migrateData() {
     }
 
     // 3g. Water Entries
-    for (const w of store.water_entries || []) {
-      if (!w.customer_id || !w.quantity || w.quantity <= 0) continue;
+    for (const w of validWaterEntries) {
       await client.query(
         `INSERT INTO water_entries (id, customer_id, product_id, quantity, price, total_amount, paid_amount, payment_status, date, time, notes, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -163,22 +182,41 @@ async function migrateData() {
     }
   });
 
-  // 5. Validate migrated records in PostgreSQL
-  console.log('4️⃣ Validating PostgreSQL records...');
+  // 5. Validate migrated records and financial totals in PostgreSQL
+  console.log('4️⃣ Validating PostgreSQL records and financial totals...');
   const validation = {};
-  const tables = ['users', 'customers', 'products', 'orders', 'order_items', 'water_entries', 'payments', 'deliveries'];
+  const tables = ['users', 'customers', 'products', 'orders', 'order_items', 'water_entries', 'payments', 'deliveries', 'business_settings'];
   for (const t of tables) {
     const res = await pool.query(`SELECT COUNT(*) as count FROM ${t}`);
     validation[t] = parseInt(res.rows[0].count, 10);
   }
   console.table(validation);
-  console.log('✅ Migration to PostgreSQL completed successfully!');
-  return { success: true, validation };
+
+  const finRes = await pool.query(`
+    SELECT
+      (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE delivery_status != 'Cancelled') as orders_total_sales,
+      (SELECT COALESCE(SUM(paid_amount), 0) FROM orders WHERE delivery_status != 'Cancelled') as orders_total_paid,
+      (SELECT COALESCE(SUM(total_amount - paid_amount), 0) FROM orders WHERE payment_status != 'Paid' AND delivery_status != 'Cancelled') as orders_pending,
+      (SELECT COALESCE(SUM(quantity), 0) FROM water_entries) as water_total_units,
+      (SELECT COALESCE(SUM(total_amount), 0) FROM water_entries) as water_total_sales,
+      (SELECT COALESCE(SUM(paid_amount), 0) FROM water_entries) as water_total_paid,
+      (SELECT COALESCE(SUM(total_amount - COALESCE(paid_amount, 0)), 0) FROM water_entries WHERE payment_status != 'Paid') as water_pending,
+      (SELECT COALESCE(SUM(amount), 0) FROM payments) as payments_total
+  `);
+  const financials = finRes.rows[0];
+  console.log('5️⃣ Verified PostgreSQL Financial Totals:');
+  console.table(financials);
+
+  console.log('✅ Migration to PostgreSQL completed and verified successfully!');
+  return { success: true, validation, financials };
 }
 
 if (require.main === module) {
   migrateData()
-    .then(() => process.exit(0))
+    .then((res) => {
+      if (!res || !res.success) process.exit(1);
+      process.exit(0);
+    })
     .catch((err) => {
       console.error('❌ Migration failed:', err);
       process.exit(1);

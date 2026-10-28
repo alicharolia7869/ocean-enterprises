@@ -1,9 +1,20 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const dotenv = require('dotenv');
 
-dotenv.config();
+if (process.env.NODE_ENV !== 'test') {
+  dotenv.config({
+    path: [
+      path.join(__dirname, '..', '.env.local'),
+      path.join(__dirname, '..', '.env')
+    ]
+  });
+} else {
+  dotenv.config();
+}
 
+const postgres = require('../server/db/postgres');
 const authRoutes = require('../server/routes/auth');
 const dashboardRoutes = require('../server/routes/dashboard');
 const customerRoutes = require('../server/routes/customers');
@@ -16,9 +27,16 @@ const reportRoutes = require('../server/routes/reports');
 const settingRoutes = require('../server/routes/settings');
 
 const app = express();
+app.disable('x-powered-by');
 
-// Middleware
+// Security headers & CORS middleware
 app.use(cors());
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
 app.use(express.json());
 
 // Route mapping - mounts on both /api/... and /... to support all Vercel rewrite patterns
@@ -40,14 +58,25 @@ routeModules.forEach(([mountPath, router]) => {
   app.use(mountPath, router);
 });
 
-// Health check endpoint
-const healthHandler = (req, res) => {
+// Health check endpoint with live database connectivity verification
+const healthHandler = async (req, res) => {
+  const isPg = postgres.isPostgresConfigured();
+  const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+  let dbConnected = false;
+
+  if (isPg) {
+    const conn = await postgres.testConnection();
+    dbConnected = Boolean(conn.ok);
+  }
+
   res.json({
-    status: 'online',
+    status: isPg && !dbConnected ? 'degraded' : 'online',
     system: 'Ocean Enterprises Business Management System API (Vercel Serverless)',
-    storage: require('../server/db/postgres').isPostgresConfigured() ? 'postgresql' : 'ephemeral-json',
-    database_configured: require('../server/db/postgres').isPostgresConfigured(),
-    persistent: require('../server/db/postgres').isPostgresConfigured(),
+    storage: isPg ? 'postgresql' : (isServerless ? 'ephemeral-json' : 'local-json'),
+    database_configured: isPg,
+    database_connected: isPg ? dbConnected : true,
+    database: isPg ? (dbConnected ? 'connected' : 'disconnected') : 'json-store',
+    persistent: isPg ? dbConnected : !isServerless,
     timestamp: new Date().toISOString()
   });
 };
@@ -64,5 +93,10 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Endpoint not found', path: req.originalUrl || req.path });
 });
 
-module.exports = app;
+// Global error handler - never leak stack traces, tokens, or database credentials
+app.use((err, req, res, _next) => {
+  console.error('Unhandled API error:', err.message);
+  res.status(err.status || 500).json({ error: 'Internal server error' });
+});
 
+module.exports = app;

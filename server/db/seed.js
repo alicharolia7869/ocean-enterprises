@@ -269,8 +269,8 @@ async function seed() {
 
   // 5. Water Entries (Rapid daily water supply records)
   const insertWater = db.prepare(`
-    INSERT INTO water_entries (customer_id, product_id, quantity, price, total_amount, payment_status, date, time, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO water_entries (customer_id, product_id, quantity, price, total_amount, paid_amount, payment_status, date, time, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const todayDateStr = new Date().toISOString().slice(0, 10);
@@ -282,18 +282,18 @@ async function seed() {
   };
 
   const waterJarId = productMap['20L Water Jar'];
-  await insertWater.run(customerMap['ABC Restaurant'], waterJarId, 6, 35, 210, 'Paid', todayDateStr, nowTimeStr, 'Delivered morning 10:30');
-  await insertWater.run(customerMap['Star Bakery & Cafe'], waterJarId, 3, 35, 105, 'Paid', todayDateStr, nowTimeStr, 'Delivered 11:15');
-  await insertWater.run(customerMap['Ali Grand Hotel'], waterJarId, 15, 35, 525, 'Pending', todayDateStr, nowTimeStr, 'Monthly payment account');
-  await insertWater.run(customerMap['Apex Tech Corporate Office'], waterJarId, 8, 35, 280, 'Pending', todayDateStr, nowTimeStr, 'Office supply');
-  await insertWater.run(customerMap['Royal Biryani House'], waterJarId, 5, 35, 175, 'Paid', todayDateStr, nowTimeStr, 'Cash collected');
-  await insertWater.run(customerMap['Deshmukh Residence'], waterJarId, 2, 35, 70, 'Paid', todayDateStr, nowTimeStr, 'Home delivery');
+  await insertWater.run(customerMap['ABC Restaurant'], waterJarId, 6, 35, 210, 210, 'Paid', todayDateStr, nowTimeStr, 'Delivered morning 10:30');
+  await insertWater.run(customerMap['Star Bakery & Cafe'], waterJarId, 3, 35, 105, 105, 'Paid', todayDateStr, nowTimeStr, 'Delivered 11:15');
+  await insertWater.run(customerMap['Ali Grand Hotel'], waterJarId, 15, 35, 525, 0, 'Pending', todayDateStr, nowTimeStr, 'Monthly payment account');
+  await insertWater.run(customerMap['Apex Tech Corporate Office'], waterJarId, 8, 35, 280, 0, 'Pending', todayDateStr, nowTimeStr, 'Office supply');
+  await insertWater.run(customerMap['Royal Biryani House'], waterJarId, 5, 35, 175, 175, 'Paid', todayDateStr, nowTimeStr, 'Cash collected');
+  await insertWater.run(customerMap['Deshmukh Residence'], waterJarId, 2, 35, 70, 70, 'Paid', todayDateStr, nowTimeStr, 'Home delivery');
 
   // Also add some yesterday/past entries for monthly summary
-  await insertWater.run(customerMap['ABC Restaurant'], waterJarId, 8, 35, 280, 'Paid', daysAgoStr(1), '11:00:00', 'Yesterday supply');
-  await insertWater.run(customerMap['ABC Restaurant'], waterJarId, 7, 35, 245, 'Paid', daysAgoStr(3), '11:00:00', 'Regular supply');
-  await insertWater.run(customerMap['Star Bakery & Cafe'], waterJarId, 4, 35, 140, 'Paid', daysAgoStr(2), '11:00:00', 'Regular supply');
-  await insertWater.run(customerMap['Ali Grand Hotel'], waterJarId, 18, 35, 630, 'Pending', daysAgoStr(4), '11:00:00', 'Bulk supply');
+  await insertWater.run(customerMap['ABC Restaurant'], waterJarId, 8, 35, 280, 280, 'Paid', daysAgoStr(1), '11:00:00', 'Yesterday supply');
+  await insertWater.run(customerMap['ABC Restaurant'], waterJarId, 7, 35, 245, 245, 'Paid', daysAgoStr(3), '11:00:00', 'Regular supply');
+  await insertWater.run(customerMap['Star Bakery & Cafe'], waterJarId, 4, 35, 140, 140, 'Paid', daysAgoStr(2), '11:00:00', 'Regular supply');
+  await insertWater.run(customerMap['Ali Grand Hotel'], waterJarId, 18, 35, 630, 0, 'Pending', daysAgoStr(4), '11:00:00', 'Bulk supply');
 
   // 6. Orders & Order Items
   const insertOrder = db.prepare(`

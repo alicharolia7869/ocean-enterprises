@@ -156,11 +156,12 @@ router.post('/', authMiddleware, async (req, res) => {
     const entryDate = date || new Date().toISOString().slice(0, 10);
     const entryTime = time || new Date().toTimeString().slice(0, 8);
     const status = payment_status || 'Pending';
+    const paidAmount = status === 'Paid' ? totalAmount : 0;
 
     // Insert water entry
     const insert = db.prepare(`
-      INSERT INTO water_entries (customer_id, product_id, quantity, price, total_amount, payment_status, date, time, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO water_entries (customer_id, product_id, quantity, price, total_amount, paid_amount, payment_status, date, time, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const result = await insert.run(
@@ -169,6 +170,7 @@ router.post('/', authMiddleware, async (req, res) => {
       qty,
       itemPrice,
       totalAmount,
+      paidAmount,
       status,
       entryDate,
       entryTime,

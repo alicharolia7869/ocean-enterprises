@@ -1,14 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Settings as SettingsIcon, 
   Building2, 
-  Phone, 
-  MessageSquare, 
-  MapPin, 
-  CreditCard, 
   Lock, 
-  CheckCircle2, 
-  Database,
   ShieldCheck,
   Save
 } from 'lucide-react';
@@ -24,7 +17,7 @@ export default function Settings() {
     upi_id: 'oceanenterprises@okhdfcbank',
     currency: '₹'
   });
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
 
   // Password state
@@ -32,10 +25,6 @@ export default function Settings() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordMsg, setPasswordMsg] = useState(null);
-
-  useEffect(() => {
-    loadSettings();
-  }, []);
 
   const loadSettings = async () => {
     try {
@@ -50,6 +39,10 @@ export default function Settings() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadSettings();
+  }, []);
 
   const handleSaveSettings = async (e) => {
     e.preventDefault();

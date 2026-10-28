@@ -3,8 +3,18 @@ const cors = require('cors');
 const path = require('path');
 const dotenv = require('dotenv');
 
-dotenv.config();
+if (process.env.NODE_ENV !== 'test') {
+  dotenv.config({
+    path: [
+      path.join(__dirname, '..', '.env.local'),
+      path.join(__dirname, '..', '.env')
+    ]
+  });
+} else {
+  dotenv.config();
+}
 
+const postgres = require('./db/postgres');
 const authRoutes = require('./routes/auth');
 const dashboardRoutes = require('./routes/dashboard');
 const customerRoutes = require('./routes/customers');
@@ -18,17 +28,24 @@ const settingRoutes = require('./routes/settings');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+app.disable('x-powered-by');
 
 // Process error safety
 process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
+  console.error('Uncaught Exception:', err.message);
 });
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason) => {
   console.error('Unhandled Rejection:', reason);
 });
 
 // Middleware
 app.use(cors());
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
 app.use(express.json());
 
 // API Routes
@@ -43,14 +60,25 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/settings', settingRoutes);
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
+// Health check endpoint with live database connectivity verification
+app.get('/api/health', async (req, res) => {
+  const isPg = postgres.isPostgresConfigured();
+  const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+  let dbConnected = false;
+
+  if (isPg) {
+    const conn = await postgres.testConnection();
+    dbConnected = Boolean(conn.ok);
+  }
+
   res.json({
-    status: 'online',
+    status: isPg && !dbConnected ? 'degraded' : 'online',
     system: 'Ocean Enterprises Business Management System API',
-    storage: require('./db/postgres').isPostgresConfigured() ? 'postgresql' : (Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) ? 'ephemeral-json' : 'local-json'),
-    database_configured: require('./db/postgres').isPostgresConfigured(),
-    persistent: require('./db/postgres').isPostgresConfigured() || !Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME),
+    storage: isPg ? 'postgresql' : (isServerless ? 'ephemeral-json' : 'local-json'),
+    database_configured: isPg,
+    database_connected: isPg ? dbConnected : true,
+    database: isPg ? (dbConnected ? 'connected' : 'disconnected') : 'json-store',
+    persistent: isPg ? dbConnected : !isServerless,
     timestamp: new Date().toISOString()
   });
 });
@@ -65,7 +93,6 @@ const clientDist = path.join(__dirname, '..', 'client', 'dist');
 app.use(express.static(clientDist));
 
 app.use((req, res) => {
-
   const indexPath = path.join(clientDist, 'index.html');
   res.sendFile(indexPath, (err) => {
     if (err) {
@@ -82,6 +109,12 @@ app.use((req, res) => {
       `);
     }
   });
+});
+
+// Global error handler - never leak stack traces, tokens, or database credentials
+app.use((err, req, res, _next) => {
+  console.error('Unhandled API error:', err.message);
+  res.status(err.status || 500).json({ error: 'Internal server error' });
 });
 
 const server = app.listen(PORT, () => {

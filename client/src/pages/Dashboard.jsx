@@ -10,7 +10,6 @@ import {
   TrendingUp, 
   Users, 
   AlertTriangle, 
-  ArrowRight, 
   Plus, 
   MessageSquare, 
   MapPin, 

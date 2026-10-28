@@ -1,15 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
-  BarChart3, 
   Download, 
-  Printer, 
-  Calendar, 
-  Users, 
-  Package, 
-  Droplet, 
-  Clock, 
-  TrendingUp,
-  FileSpreadsheet
+  Printer
 } from 'lucide-react';
 import { api } from '../services/api';
 import { exportToCSV, printStatement } from '../utils/export';
@@ -23,11 +15,7 @@ export default function Reports() {
   const [productData, setProductData] = useState([]);
   const [, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadReport();
-  }, [activeReport, salesPeriod]);
-
-  const loadReport = async () => {
+  const loadReport = useCallback(async () => {
     try {
       setLoading(true);
       if (activeReport === 'sales') {
@@ -45,7 +33,11 @@ export default function Reports() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeReport, salesPeriod]);
+
+  useEffect(() => {
+    loadReport();
+  }, [loadReport]);
 
   const handleExport = () => {
     if (activeReport === 'sales') {

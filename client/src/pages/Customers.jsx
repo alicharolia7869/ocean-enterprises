@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
-  Users, 
   Plus, 
   Search, 
   Phone, 
@@ -12,22 +11,19 @@ import {
   Compass, 
   FileText, 
   Printer, 
-  DollarSign, 
-  Droplet,
   X,
-  CheckCircle2,
-  Calendar
+  CheckCircle2
 } from 'lucide-react';
 import { api } from '../services/api';
-import { openWhatsApp, sendPaymentReminder } from '../utils/whatsapp';
-import { openGoogleMapsPin, openGoogleMapsNavigation, captureCurrentLocation } from '../utils/maps';
+import { openWhatsApp } from '../utils/whatsapp';
+import { openGoogleMapsPin, captureCurrentLocation } from '../utils/maps';
 import { printStatement } from '../utils/export';
 
 export default function Customers({ selectedCustomerIdToOpen }) {
   const [customers, setCustomers] = useState([]);
   const [typeFilter, setTypeFilter] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -49,18 +45,7 @@ export default function Customers({ selectedCustomerIdToOpen }) {
   };
   const [formData, setFormData] = useState(initialForm);
 
-  useEffect(() => {
-    loadCustomers();
-  }, [typeFilter, searchQuery]);
-
-  useEffect(() => {
-    if (selectedCustomerIdToOpen && customers.length > 0) {
-      const found = customers.find(c => c.id === Number(selectedCustomerIdToOpen));
-      if (found) handleOpenDetail(found.id);
-    }
-  }, [selectedCustomerIdToOpen, customers]);
-
-  const loadCustomers = async () => {
+  const loadCustomers = useCallback(async () => {
     try {
       setLoading(true);
       const res = await api.getCustomers({ type: typeFilter, search: searchQuery });
@@ -70,7 +55,27 @@ export default function Customers({ selectedCustomerIdToOpen }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [typeFilter, searchQuery]);
+
+  const handleOpenDetail = useCallback(async (id) => {
+    try {
+      const res = await api.getCustomerById(id);
+      setViewingCustomerDetail(res);
+    } catch (err) {
+      alert('Error fetching customer history: ' + err.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCustomers();
+  }, [loadCustomers]);
+
+  useEffect(() => {
+    if (selectedCustomerIdToOpen && customers.length > 0) {
+      const found = customers.find(c => c.id === Number(selectedCustomerIdToOpen));
+      if (found) handleOpenDetail(found.id);
+    }
+  }, [selectedCustomerIdToOpen, customers, handleOpenDetail]);
 
   const handleOpenAdd = () => {
     setFormData(initialForm);
@@ -135,15 +140,6 @@ export default function Customers({ selectedCustomerIdToOpen }) {
       alert('Could not capture GPS location: ' + err.message);
     } finally {
       setGpsCapturing(false);
-    }
-  };
-
-  const handleOpenDetail = async (id) => {
-    try {
-      const res = await api.getCustomerById(id);
-      setViewingCustomerDetail(res);
-    } catch (err) {
-      alert('Error fetching customer history: ' + err.message);
     }
   };
 

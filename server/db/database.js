@@ -326,10 +326,12 @@ class Statement {
     // 12. INSERT INTO water_entries
     if (/^INSERT INTO water_entries/i.test(s)) {
       const id = ++store.sequences.water_entries;
-      let customer_id, product_id, quantity, price, total_amount, payment_status, date, time, notes;
+      let customer_id, product_id, quantity, price, total_amount, paid_amount, payment_status, date, time, notes;
       
-      // Check if it's the standard 9-param or seed date('now') variants
-      if (params.length === 9) {
+      // Check if it's 10-param (with paid_amount), 9-param, or seed date('now') variants
+      if (params.length === 10) {
+        [customer_id, product_id, quantity, price, total_amount, paid_amount, payment_status, date, time, notes] = params;
+      } else if (params.length === 9) {
         [customer_id, product_id, quantity, price, total_amount, payment_status, date, time, notes] = params;
       } else if (params.length === 7) {
         // seed format: (customer_id, product_id, quantity, price, total_amount, payment_status, notes)
@@ -361,7 +363,7 @@ class Statement {
         quantity: Number(quantity),
         price: Number(price),
         total_amount: Number(total_amount),
-        paid_amount: normStatus === 'Paid' ? Number(total_amount) : 0,
+        paid_amount: paid_amount !== undefined ? Number(paid_amount) : (normStatus === 'Paid' ? Number(total_amount) : 0),
         payment_status: normStatus,
         date: date || new Date().toISOString().slice(0, 10),
         time: time || new Date().toTimeString().slice(0, 8),

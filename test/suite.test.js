@@ -4,9 +4,13 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 
-// Set test environment
+// Set test environment (keep suites 1-11 isolated on backed-up JSON store; suite 12 tests live PostgreSQL)
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test_jwt_secret_key_for_verification_2026';
+const initialDatabaseUrl = process.env.DATABASE_URL;
+const initialPostgresUrl = process.env.POSTGRES_URL;
+delete process.env.DATABASE_URL;
+delete process.env.POSTGRES_URL;
 
 const app = require('../api/index');
 
@@ -772,13 +776,144 @@ test('12. PostgreSQL Adapter, Query Normalization & Migration SQL Verification',
 
   await t.test('migrateData fails safely when DATABASE_URL is not configured', async () => {
     const prevDbUrl = process.env.DATABASE_URL;
+    const prevPgUrl = process.env.POSTGRES_URL;
     try {
       delete process.env.DATABASE_URL;
+      delete process.env.POSTGRES_URL;
       const result = await migrateData();
       assert.equal(result.success, false);
       assert.equal(result.reason, 'MISSING_DATABASE_URL');
     } finally {
       if (prevDbUrl !== undefined) process.env.DATABASE_URL = prevDbUrl;
+      if (prevPgUrl !== undefined) process.env.POSTGRES_URL = prevPgUrl;
+    }
+  });
+
+  await t.test('Live PostgreSQL integration: connection, schema, transaction rollback, and controlled persistence', async () => {
+    const dotenv = require('dotenv');
+    const envLocalPath = path.join(__dirname, '..', '.env.local');
+    const prevDbUrl = process.env.DATABASE_URL;
+    const prevPgUrl = process.env.POSTGRES_URL;
+    let tempCustId = null;
+
+    if (initialDatabaseUrl) {
+      process.env.DATABASE_URL = initialDatabaseUrl;
+    } else if (!process.env.DATABASE_URL && fs.existsSync(envLocalPath)) {
+      const parsed = dotenv.parse(fs.readFileSync(envLocalPath, 'utf8'));
+      if (parsed.DATABASE_URL) process.env.DATABASE_URL = parsed.DATABASE_URL;
+    }
+    if (initialPostgresUrl && !process.env.POSTGRES_URL) {
+      process.env.POSTGRES_URL = initialPostgresUrl;
+    }
+
+    try {
+      assert.equal(postgres.isPostgresConfigured(), true, 'PostgreSQL must be configured via DATABASE_URL');
+      const conn = await postgres.testConnection();
+      assert.equal(conn.ok, true, `PostgreSQL connection must succeed: ${conn.error || ''}`);
+
+      // Verify schema tables and water_entries.paid_amount column
+      const colCheck = await postgres.getOne(`
+        SELECT column_name, data_type, column_default
+        FROM information_schema.columns
+        WHERE table_name = 'water_entries' AND column_name = 'paid_amount'
+      `);
+      assert.ok(colCheck, 'water_entries.paid_amount column must exist in PostgreSQL');
+
+      // Verify baseline migrated counts
+      const custCountBefore = await postgres.getOne('SELECT COUNT(*) as count FROM customers');
+      assert.ok(custCountBefore.count >= 17, 'Migrated customers count must be at least 17');
+
+      // Verify transaction rollback on error
+      await assert.rejects(async () => {
+        await postgres.transaction(async (tx) => {
+          await tx.prepare(`
+            INSERT INTO customers (name, business_name, phone, whatsapp_number, address, customer_type, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `).run('Rollback Test Customer', 'Rollback Biz', '0000000000', '0000000000', 'Rollback Addr', 'Shop', 'Must rollback');
+          throw new Error('SIMULATED_TX_FAILURE');
+        });
+      }, /SIMULATED_TX_FAILURE/);
+
+      const custCountAfterRollback = await postgres.getOne('SELECT COUNT(*) as count FROM customers');
+      assert.equal(custCountAfterRollback.count, custCountBefore.count, 'Rolled back transaction must not persist any customer row');
+
+      // Verify controlled persistence via HTTP routes backed by PostgreSQL
+      const createCustRes = await req('/api/customers', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'PG Live Persistence Test',
+          business_name: 'PG Test Enterprises',
+          phone: '9999900001',
+          address: 'Neon Verification Complex',
+          customer_type: 'Office'
+        })
+      });
+      assert.equal(createCustRes.status, 201);
+      tempCustId = createCustRes.data.customer.id;
+      assert.ok(tempCustId);
+
+      // Verify partial customer update preserves NOT NULL address in PostgreSQL
+      const updateCustRes = await req(`/api/customers/${tempCustId}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: 'PG Live Persistence Updated',
+          business_name: 'PG Test Enterprises Updated'
+        })
+      });
+      assert.equal(updateCustRes.status, 200);
+      assert.equal(updateCustRes.data.customer.name, 'PG Live Persistence Updated');
+      assert.equal(updateCustRes.data.customer.address, 'Neon Verification Complex');
+
+      // Log a ₹350 water entry and ₹150 partial payment in PostgreSQL
+      const wRes = await req('/api/water', {
+        method: 'POST',
+        body: JSON.stringify({
+          customer_id: tempCustId,
+          quantity: 10,
+          price: 35,
+          payment_status: 'Pending',
+          notes: 'PG integration water entry'
+        })
+      });
+      assert.equal(wRes.status, 201);
+      const tempWaterId = wRes.data.entry.id;
+
+      const pRes = await req('/api/payments', {
+        method: 'POST',
+        body: JSON.stringify({
+          customer_id: tempCustId,
+          water_entry_id: tempWaterId,
+          amount: 150,
+          payment_mode: 'UPI',
+          notes: 'PG integration partial payment'
+        })
+      });
+      assert.equal(pRes.status, 201);
+
+      const custDetailRes = await req(`/api/customers/${tempCustId}`);
+      assert.equal(custDetailRes.status, 200);
+      assert.equal(custDetailRes.data.customer.pending_balance, 200, 'PostgreSQL pending balance after 150/350 payment must be 200');
+
+      // Delete controlled test water entry (restores stock of default water jar) and controlled test customer
+      await req(`/api/water/${tempWaterId}`, { method: 'DELETE' });
+      const delCustRes = await req(`/api/customers/${tempCustId}`, { method: 'DELETE' });
+      assert.equal(delCustRes.status, 200);
+      tempCustId = null;
+
+      const custCountFinal = await postgres.getOne('SELECT COUNT(*) as count FROM customers');
+      assert.equal(custCountFinal.count, custCountBefore.count, 'Customer count must return to exact baseline after cleanup');
+    } finally {
+      if (tempCustId) {
+        try {
+          await postgres.run('DELETE FROM customers WHERE id = ?', [tempCustId]);
+        } catch (e) {}
+      }
+      if (prevDbUrl === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = prevDbUrl;
+      if (prevPgUrl === undefined) delete process.env.POSTGRES_URL;
+      else process.env.POSTGRES_URL = prevPgUrl;
+      const p = postgres.getPool();
+      if (p) await p.end().catch(() => {});
     }
   });
 });

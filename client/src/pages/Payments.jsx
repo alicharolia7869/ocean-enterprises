@@ -1,15 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
-  CreditCard, 
-  IndianRupee, 
   Send, 
   CheckCircle2, 
-  Clock, 
   AlertCircle, 
   Plus, 
-  Search, 
-  Filter,
-  DollarSign,
   X,
   RefreshCw
 } from 'lucide-react';
@@ -31,11 +25,7 @@ export default function Payments() {
   const [payNotes, setPayNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    loadPayments();
-  }, [modeFilter]);
-
-  const loadPayments = async () => {
+  const loadPayments = useCallback(async () => {
     try {
       setLoading(true);
       const [pRes, cRes] = await Promise.all([
@@ -50,7 +40,11 @@ export default function Payments() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [modeFilter]);
+
+  useEffect(() => {
+    loadPayments();
+  }, [loadPayments]);
 
   const handleOpenRecordPay = (customerId = '') => {
     setSelectedCustomerId(customerId ? String(customerId) : '');

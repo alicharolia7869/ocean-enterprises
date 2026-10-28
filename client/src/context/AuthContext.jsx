@@ -11,6 +11,22 @@ export function AuthProvider({ children }) {
   const [token, setToken] = useState(() => localStorage.getItem('ocean_token'));
   const [loading, setLoading] = useState(true);
 
+  const login = async (emailOrPhone, password) => {
+    const res = await api.login(emailOrPhone, password);
+    setToken(res.token);
+    setUser(res.user);
+    localStorage.setItem('ocean_token', res.token);
+    localStorage.setItem('ocean_user', JSON.stringify(res.user));
+    return res.user;
+  };
+
+  const logout = () => {
+    setToken(null);
+    setUser(null);
+    localStorage.removeItem('ocean_token');
+    localStorage.removeItem('ocean_user');
+  };
+
   useEffect(() => {
     async function checkAuth() {
       if (token) {
@@ -36,22 +52,6 @@ export function AuthProvider({ children }) {
 
     return () => window.removeEventListener('ocean_auth_change', handleAuthChange);
   }, [token]);
-
-  const login = async (emailOrPhone, password) => {
-    const res = await api.login(emailOrPhone, password);
-    setToken(res.token);
-    setUser(res.user);
-    localStorage.setItem('ocean_token', res.token);
-    localStorage.setItem('ocean_user', JSON.stringify(res.user));
-    return res.user;
-  };
-
-  const logout = () => {
-    setToken(null);
-    setUser(null);
-    localStorage.removeItem('ocean_token');
-    localStorage.removeItem('ocean_user');
-  };
 
   return (
     <AuthContext.Provider value={{ user, token, loading, login, logout, isAuthenticated: !!token }}>

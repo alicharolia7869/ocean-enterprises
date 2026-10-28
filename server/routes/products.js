@@ -13,6 +13,8 @@ router.get('/', authMiddleware, async (req, res) => {
 
     if (category && category !== 'All') {
       query += ' AND category = ?';
+    }
+    if (category && category !== 'All') {
       params.push(category);
     }
 
@@ -111,6 +113,11 @@ router.post('/', authMiddleware, async (req, res) => {
 // PUT /api/products/:id - Update product
 router.put('/:id', authMiddleware, async (req, res) => {
   try {
+    const existing = await db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+
     const { name, category, size, selling_price, purchase_price, stock, minimum_stock, active } = req.body;
     const update = db.prepare(`
       UPDATE products 
@@ -120,14 +127,14 @@ router.put('/:id', authMiddleware, async (req, res) => {
     `);
 
     await update.run(
-      name,
-      category,
-      size,
-      parseFloat(selling_price),
-      parseFloat(purchase_price),
-      parseInt(stock, 10),
-      parseInt(minimum_stock, 10),
-      active === undefined ? 1 : (active ? 1 : 0),
+      name !== undefined ? name : existing.name,
+      category !== undefined ? category : existing.category,
+      size !== undefined ? size : existing.size,
+      selling_price !== undefined ? parseFloat(selling_price) : parseFloat(existing.selling_price),
+      purchase_price !== undefined ? parseFloat(purchase_price) : parseFloat(existing.purchase_price),
+      stock !== undefined ? parseInt(stock, 10) : parseInt(existing.stock, 10),
+      minimum_stock !== undefined ? parseInt(minimum_stock, 10) : parseInt(existing.minimum_stock, 10),
+      active === undefined ? existing.active : (active ? 1 : 0),
       req.params.id
     );
 

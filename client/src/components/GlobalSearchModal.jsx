@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, Users, Package, FileText, Phone, MessageSquare, MapPin } from 'lucide-react';
+import { Search, X, MessageSquare, MapPin } from 'lucide-react';
 import { api } from '../services/api';
 import { openWhatsApp } from '../utils/whatsapp';
 import { openGoogleMapsPin } from '../utils/maps';
@@ -11,6 +11,24 @@ export default function GlobalSearchModal({ isOpen, onClose, onSelectCustomer, o
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   const inputRef = useRef(null);
+
+  const fetchAllData = async () => {
+    try {
+      setLoading(true);
+      const [cRes, oRes, pRes] = await Promise.all([
+        api.getCustomers(),
+        api.getOrders(),
+        api.getProducts()
+      ]);
+      setCustomers(cRes.customers || []);
+      setOrders(oRes.orders || []);
+      setProducts(pRes.products || []);
+    } catch (err) {
+      console.error('Error prefetching search data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -31,24 +49,6 @@ export default function GlobalSearchModal({ isOpen, onClose, onSelectCustomer, o
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
-
-  const fetchAllData = async () => {
-    try {
-      setLoading(true);
-      const [cRes, oRes, pRes] = await Promise.all([
-        api.getCustomers(),
-        api.getOrders(),
-        api.getProducts()
-      ]);
-      setCustomers(cRes.customers || []);
-      setOrders(oRes.orders || []);
-      setProducts(pRes.products || []);
-    } catch (err) {
-      console.error('Error prefetching search data:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   if (!isOpen) return null;
 

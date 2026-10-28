@@ -2,18 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { 
   MessageSquare, 
   Sparkles, 
-  ArrowRight, 
   CheckCircle, 
-  XCircle, 
-  Clock, 
-  Truck, 
   Send, 
-  Edit, 
-  Plus, 
   Share2, 
   MapPin, 
   DollarSign, 
-  UserPlus,
+  Truck,
   RefreshCw
 } from 'lucide-react';
 import { api } from '../services/api';
@@ -22,8 +16,7 @@ import {
   sendDeliveryNotification, 
   sendOrderDelivered, 
   sendPaymentReminder, 
-  generateOrderCatalogLink,
-  openWhatsApp
+  generateOrderCatalogLink
 } from '../utils/whatsapp';
 
 export default function WhatsAppOrders() {
@@ -35,20 +28,13 @@ export default function WhatsAppOrders() {
   // Selected customer for creating order
   const [customers, setCustomers] = useState([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
+  const [, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [specialInstructions, setSpecialInstructions] = useState('');
 
   // Orders queue
   const [whatsappOrders, setWhatsappOrders] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
-
-  // Edit order modal
-  const [editingOrder, setEditingOrder] = useState(null);
-
-  useEffect(() => {
-    loadData();
-  }, []);
 
   const loadData = async () => {
     try {
@@ -67,6 +53,10 @@ export default function WhatsAppOrders() {
       setLoadingOrders(false);
     }
   };
+
+  useEffect(() => {
+    loadData();
+  }, []);
 
   const handleParse = async (textToParse = rawText) => {
     if (!textToParse.trim()) return;

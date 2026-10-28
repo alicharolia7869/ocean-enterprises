@@ -217,7 +217,13 @@ router.post('/', authMiddleware, async (req, res) => {
 // PUT /api/customers/:id - Update customer
 router.put('/:id', authMiddleware, async (req, res) => {
   try {
+    const existing = await db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
     const { name, business_name, phone, whatsapp_number, address, latitude, longitude, customer_type, notes } = req.body;
+    const nextPhone = phone !== undefined ? phone : existing.phone;
     const update = db.prepare(`
       UPDATE customers 
       SET name = ?, business_name = ?, phone = ?, whatsapp_number = ?, address = ?, 
@@ -226,15 +232,15 @@ router.put('/:id', authMiddleware, async (req, res) => {
     `);
 
     await update.run(
-      name,
-      business_name,
-      phone,
-      whatsapp_number || phone,
-      address,
-      latitude ? parseFloat(latitude) : null,
-      longitude ? parseFloat(longitude) : null,
-      customer_type,
-      notes,
+      name !== undefined ? name : existing.name,
+      business_name !== undefined ? business_name : existing.business_name,
+      nextPhone,
+      whatsapp_number !== undefined ? (whatsapp_number || nextPhone) : (existing.whatsapp_number || nextPhone),
+      address !== undefined ? address : existing.address,
+      latitude !== undefined ? (latitude !== null && latitude !== '' ? parseFloat(latitude) : null) : existing.latitude,
+      longitude !== undefined ? (longitude !== null && longitude !== '' ? parseFloat(longitude) : null) : existing.longitude,
+      customer_type !== undefined ? customer_type : existing.customer_type,
+      notes !== undefined ? notes : existing.notes,
       req.params.id
     );
 

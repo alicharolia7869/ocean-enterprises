@@ -4,8 +4,12 @@ const path = require('path');
 
 // Keep PostgreSQL DATE columns (OID 1082) as 'YYYY-MM-DD' strings so date slicing works consistently
 types.setTypeParser(1082, (val) => val);
+// Parse PostgreSQL NUMERIC/DECIMAL (OID 1700) and BIGINT/INT8 (OID 20) into JS numbers to match JSON store types
+types.setTypeParser(1700, (val) => (val === null ? null : parseFloat(val)));
+types.setTypeParser(20, (val) => (val === null ? null : parseInt(val, 10)));
 
 let pool = null;
+let poolConnectionString = null;
 
 function getConnectionString() {
   return process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
@@ -16,21 +20,27 @@ function isPostgresConfigured() {
   return Boolean(dbUrl && (dbUrl.startsWith('postgresql://') || dbUrl.startsWith('postgres://')));
 }
 
-function getPool() {
-  if (pool) return pool;
-
-  const connectionString = getConnectionString();
-  if (!connectionString) {
-    return null;
-  }
-
-  const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
+function buildPoolConfig(rawConnectionString) {
+  const isLocal = rawConnectionString.includes('localhost') || rawConnectionString.includes('127.0.0.1');
+  const disableSsl = /sslmode=disable/i.test(rawConnectionString) || process.env.PGSSLMODE === 'disable';
   const strictSsl = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== undefined
     ? process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false'
-    : /sslmode=(verify-ca|verify-full)/i.test(connectionString);
+    : !/sslmode=no-verify/i.test(rawConnectionString);
+
+  let cleanConnectionString = rawConnectionString;
+  if (!isLocal && !disableSsl) {
+    try {
+      const parsed = new URL(rawConnectionString);
+      parsed.searchParams.delete('sslmode');
+      parsed.searchParams.delete('channel_binding');
+      cleanConnectionString = parsed.toString();
+    } catch (e) {
+      cleanConnectionString = rawConnectionString;
+    }
+  }
 
   let sslConfig = false;
-  if (!isLocal) {
+  if (!isLocal && !disableSsl) {
     sslConfig = { rejectUnauthorized: strictSsl };
     if (process.env.PGSSLROOTCERT && fs.existsSync(process.env.PGSSLROOTCERT)) {
       sslConfig.ca = fs.readFileSync(process.env.PGSSLROOTCERT, 'utf8');
@@ -38,16 +48,34 @@ function getPool() {
     }
   }
 
-  pool = new Pool({
-    connectionString,
+  const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+  const defaultMax = isServerless ? '5' : '10';
+
+  return {
+    connectionString: cleanConnectionString,
     ssl: sslConfig,
-    max: parseInt(process.env.PG_MAX_CONNECTIONS || '10', 10),
+    max: parseInt(process.env.PG_MAX_CONNECTIONS || defaultMax, 10),
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000
-  });
+    connectionTimeoutMillis: 10000,
+    allowExitOnIdle: true
+  };
+}
+
+function getPool() {
+  const connectionString = getConnectionString();
+  if (!connectionString) {
+    return null;
+  }
+
+  if (pool && poolConnectionString === connectionString) {
+    return pool;
+  }
+
+  poolConnectionString = connectionString;
+  pool = new Pool(buildPoolConfig(connectionString));
 
   pool.on('error', (err) => {
-    console.error('Unexpected error on idle PostgreSQL client pool:', err);
+    console.error('Unexpected error on idle PostgreSQL client pool:', err.message);
   });
 
   return pool;

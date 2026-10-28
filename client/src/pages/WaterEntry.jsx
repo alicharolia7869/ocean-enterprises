@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Droplet, 
   Search, 
@@ -25,16 +25,12 @@ export default function WaterEntry() {
   const [summary, setSummary] = useState(null);
   const [recentEntries, setRecentEntries] = useState([]);
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
 
   // Success toast
   const [lastSaved, setLastSaved] = useState(null);
 
-  useEffect(() => {
-    loadData();
-  }, [selectedMonth]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       const [cRes, sRes, eRes] = await Promise.all([
@@ -50,7 +46,11 @@ export default function WaterEntry() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedMonth]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleQuickAdd = (inc) => {
     setQuantity(prev => Math.max(1, prev + inc));

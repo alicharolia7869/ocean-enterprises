@@ -1,21 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Truck, 
   MapPin, 
   Phone, 
   Navigation as NavIcon, 
   CheckCircle2, 
-  Clock, 
-  ArrowRight, 
   Send, 
-  Compass, 
   RefreshCw,
-  ExternalLink,
   ChevronUp,
   ChevronDown
 } from 'lucide-react';
 import { api } from '../services/api';
-import { openGoogleMapsNavigation, openGoogleMapsPin } from '../utils/maps';
+import { openGoogleMapsNavigation } from '../utils/maps';
 import { sendDeliveryNotification, sendOrderDelivered } from '../utils/whatsapp';
 
 export default function Deliveries({ onOpenRouteMap }) {
@@ -23,11 +19,7 @@ export default function Deliveries({ onOpenRouteMap }) {
   const [statusFilter, setStatusFilter] = useState('All');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadDeliveries();
-  }, [statusFilter]);
-
-  const loadDeliveries = async () => {
+  const loadDeliveries = useCallback(async () => {
     try {
       setLoading(true);
       const res = await api.getDeliveries({ status: statusFilter });
@@ -37,7 +29,11 @@ export default function Deliveries({ onOpenRouteMap }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [statusFilter]);
+
+  useEffect(() => {
+    loadDeliveries();
+  }, [loadDeliveries]);
 
   const handleStatusChange = async (id, newStatus) => {
     try {

@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
-  Package, 
   Plus, 
   Search, 
   Edit, 
@@ -8,11 +7,8 @@ import {
   AlertTriangle, 
   Droplet, 
   CupSoda, 
-  ArrowUpRight, 
   CheckCircle2, 
-  X,
-  TrendingUp,
-  Boxes
+  X
 } from 'lucide-react';
 import { api } from '../services/api';
 
@@ -21,7 +17,7 @@ export default function Products() {
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [lowStockFilter, setLowStockFilter] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
 
   // Add / Edit Modal
   const [showModal, setShowModal] = useState(false);
@@ -41,11 +37,7 @@ export default function Products() {
   const [stockModalProduct, setStockModalProduct] = useState(null);
   const [addedStockUnits, setAddedStockUnits] = useState(50);
 
-  useEffect(() => {
-    loadProducts();
-  }, [categoryFilter, lowStockFilter]);
-
-  const loadProducts = async () => {
+  const loadProducts = useCallback(async () => {
     try {
       setLoading(true);
       const res = await api.getProducts({
@@ -58,7 +50,11 @@ export default function Products() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [categoryFilter, lowStockFilter]);
+
+  useEffect(() => {
+    loadProducts();
+  }, [loadProducts]);
 
   const handleOpenAdd = () => {
     setEditingProduct(null);

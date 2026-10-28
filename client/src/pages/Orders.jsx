@@ -1,28 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
-  FileText, 
   Plus, 
-  Search, 
-  Filter, 
   Download, 
-  Printer, 
   CheckCircle2, 
   Send, 
-  MapPin, 
   X,
-  RefreshCw,
   PlusCircle,
   Trash2
 } from 'lucide-react';
 import { api } from '../services/api';
 import { exportToCSV } from '../utils/export';
-import { sendOrderConfirmation, sendDeliveryNotification, sendOrderDelivered } from '../utils/whatsapp';
+import { sendOrderConfirmation } from '../utils/whatsapp';
 
 export default function Orders({ openNewOrderModal, onCloseNewOrderModal }) {
   const [orders, setOrders] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
 
   // Filters
   const [timeFilter, setTimeFilter] = useState('Today');
@@ -41,17 +35,7 @@ export default function Orders({ openNewOrderModal, onCloseNewOrderModal }) {
   const [orderInitialPaid, setOrderInitialPaid] = useState('');
   const [creating, setCreating] = useState(false);
 
-  useEffect(() => {
-    if (openNewOrderModal) {
-      setShowCreateModal(true);
-    }
-  }, [openNewOrderModal]);
-
-  useEffect(() => {
-    loadData();
-  }, [timeFilter, selectedCustomerId, deliveryFilter, paymentFilter]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       const [oRes, cRes, pRes] = await Promise.all([
@@ -72,7 +56,17 @@ export default function Orders({ openNewOrderModal, onCloseNewOrderModal }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [timeFilter, selectedCustomerId, deliveryFilter, paymentFilter]);
+
+  useEffect(() => {
+    if (openNewOrderModal) {
+      setShowCreateModal(true);
+    }
+  }, [openNewOrderModal]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleAddItemRow = () => {
     setOrderItems([...orderItems, { product_id: '', quantity: 1, price: 0 }]);
