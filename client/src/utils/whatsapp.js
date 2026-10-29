@@ -1,13 +1,43 @@
 // WhatsApp Integration & Deep Linking Utility
 
+export const DEFAULT_BUSINESS_WHATSAPP = '919769900568';
+
+// Known dummy / placeholder numbers from seed data that are not registered on WhatsApp
+const INACTIVE_DUMMY_NUMBERS = new Set([
+  '919876543210', '9876543210',
+  '919819988776', '9819988776',
+  '919820112233', '9820112233',
+  '919892334455', '9892334455',
+  '919833445566', '9833445566',
+  '919769001122', '9769001122',
+  '919820011001', '9820011001',
+  '919820011002', '9820011002',
+  '919820011003', '9820011003',
+  '919820011004', '9820011004',
+  '919820011005', '9820011005',
+  '919820011006', '9820011006',
+  '919820011007', '9820011007',
+  '919820011008', '9820011008',
+  '919820011009', '9820011009',
+  '919820011010', '9820011010',
+  '919820011011', '9820011011'
+]);
+
 /**
  * Clean phone number for WhatsApp deep link (adds 91 default country code if missing)
  */
 export function formatWhatsAppPhone(phone) {
   if (!phone) return '';
   const digits = String(phone).replace(/[^0-9]/g, '');
+  if (INACTIVE_DUMMY_NUMBERS.has(digits)) {
+    return DEFAULT_BUSINESS_WHATSAPP;
+  }
   if (digits.length === 10) {
-    return `91${digits}`;
+    const formatted = `91${digits}`;
+    if (INACTIVE_DUMMY_NUMBERS.has(formatted)) {
+      return DEFAULT_BUSINESS_WHATSAPP;
+    }
+    return formatted;
   }
   return digits;
 }
@@ -169,7 +199,8 @@ Ocean Enterprises`;
 /**
  * Template 5: Customer "Order on WhatsApp" pre-filled message generator
  */
-export function generateOrderCatalogLink(businessPhone = '919876543210') {
+export function generateOrderCatalogLink(businessPhone = DEFAULT_BUSINESS_WHATSAPP) {
+  const cleanPhone = formatWhatsAppPhone(businessPhone) || DEFAULT_BUSINESS_WHATSAPP;
   const template = 
 `Hello Ocean Enterprises, I want to place an order.
 
@@ -183,5 +214,5 @@ Cold Drinks:
 Delivery Location:
 [Please enter your shop/business name & address here]`;
 
-  return `https://wa.me/${businessPhone}?text=${encodeURIComponent(template)}`;
+  return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(template)}`;
 }

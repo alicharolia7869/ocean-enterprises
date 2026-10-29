@@ -10,8 +10,8 @@ import { api } from '../services/api';
 export default function Settings() {
   const [settings, setSettings] = useState({
     business_name: 'Ocean Enterprises',
-    phone: '+91 98765 43210',
-    whatsapp: '919876543210',
+    phone: '+91 97699 00568',
+    whatsapp: '919769900568',
     email: 'orders@oceanenterprises.com',
     address: 'Muntaha Building, JVLR Road, Jogeshwari (West), Mumbai - 400102',
     upi_id: 'oceanenterprises@okhdfcbank',

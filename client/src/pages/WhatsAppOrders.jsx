@@ -16,7 +16,8 @@ import {
   sendDeliveryNotification, 
   sendOrderDelivered, 
   sendPaymentReminder, 
-  generateOrderCatalogLink
+  generateOrderCatalogLink,
+  DEFAULT_BUSINESS_WHATSAPP
 } from '../utils/whatsapp';
 
 export default function WhatsAppOrders() {
@@ -35,15 +36,18 @@ export default function WhatsAppOrders() {
   // Orders queue
   const [whatsappOrders, setWhatsappOrders] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
+  const [businessSettings, setBusinessSettings] = useState(null);
 
   const loadData = async () => {
     try {
       setLoadingOrders(true);
-      const [cRes, oRes] = await Promise.all([
+      const [cRes, oRes, sRes] = await Promise.all([
         api.getCustomers(),
-        api.getOrders()
+        api.getOrders(),
+        api.getPublicSettings().catch(() => ({ settings: {} }))
       ]);
       setCustomers(cRes.customers || []);
+      setBusinessSettings(sRes.settings || {});
       // Filter orders from WhatsApp or all recent
       const wa = (oRes.orders || []).filter(o => o.source === 'WhatsApp' || o.source === 'Manual');
       setWhatsappOrders(wa);
@@ -155,7 +159,7 @@ export default function WhatsAppOrders() {
 
         <div style={{ display: 'flex', gap: '10px' }}>
           <a 
-            href={generateOrderCatalogLink()} 
+            href={generateOrderCatalogLink(businessSettings?.whatsapp || DEFAULT_BUSINESS_WHATSAPP)} 
             target="_blank" 
             rel="noreferrer"
             className="btn btn-whatsapp"

@@ -26,8 +26,8 @@ async function seed() {
     VALUES (?, ?)
   `);
   await insertSetting.run('business_name', 'Ocean Enterprises');
-  await insertSetting.run('phone', '+91 98765 43210');
-  await insertSetting.run('whatsapp', '919876543210');
+  await insertSetting.run('phone', '+91 97699 00568');
+  await insertSetting.run('whatsapp', '919769900568');
   await insertSetting.run('email', 'orders@oceanenterprises.com');
   await insertSetting.run('address', 'Muntaha Building, JVLR Road, Jogeshwari (West), Mumbai - 400102');
   await insertSetting.run('upi_id', 'oceanenterprises@okhdfcbank');
@@ -70,8 +70,8 @@ async function seed() {
     {
       name: 'Rajesh Sharma',
       business_name: 'ABC Restaurant',
-      phone: '9876543210',
-      whatsapp_number: '9876543210',
+      phone: '9769900568',
+      whatsapp_number: '9769900568',
       address: 'Shop 12, Main Market Road, Near City Clock Tower',
       latitude: 19.0760,
       longitude: 72.8777,
