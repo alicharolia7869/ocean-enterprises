@@ -652,3 +652,91 @@ h1, h2, h3, h4, h5, h6, .brand-title {
     display: none !important;
   }
 }
+
+/* ============================================================================
+   Help & Documentation Center (/docs) Styles & Accessibility
+   ============================================================================ */
+
+.docs-focusable:focus-visible,
+.btn:focus-visible,
+.nav-item:focus-visible,
+.mobile-nav-link:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.docs-layout-grid {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 220px;
+  gap: 24px;
+  align-items: start;
+}
+
+.docs-sidebar-panel {
+  position: sticky;
+  top: 76px;
+}
+
+.docs-toc-panel {
+  position: sticky;
+  top: 76px;
+}
+
+.docs-mobile-drawer-btn {
+  display: none;
+}
+
+.docs-highlights-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.docs-prev-next-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 1200px) {
+  .docs-layout-grid {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+  .docs-toc-panel {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .docs-layout-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .docs-sidebar-panel {
+    display: none;
+  }
+  .docs-sidebar-panel.mobile-open {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 290px;
+    max-width: 85vw;
+    background: #ffffff;
+    z-index: 70;
+    padding: 18px;
+    overflow-y: auto;
+    box-shadow: var(--shadow-dialog);
+    border-right: 1px solid var(--slate-200);
+  }
+  .docs-mobile-drawer-btn {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 640px) {
+  .docs-highlights-grid,
+  .docs-prev-next-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

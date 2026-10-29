@@ -933,3 +933,89 @@ test('12. PostgreSQL Adapter, Query Normalization & Migration SQL Verification',
     }
   });
 });
+
+test('13. Documentation Suite, Mermaid Diagrams & Help Center Search Verification', async (t) => {
+  const rootDir = path.join(__dirname, '..');
+  const docsDir = path.join(rootDir, 'docs');
+  const expectedDocFiles = [
+    'index.md',
+    'business-overview.md',
+    'features.md',
+    'user-guide.md',
+    'system-architecture.md',
+    'database-design.md',
+    'api-reference.md',
+    'authentication-and-security.md',
+    'local-development.md',
+    'environment-configuration.md',
+    'deployment-guide.md',
+    'testing-and-validation.md',
+    'troubleshooting.md',
+    'maintenance-and-recovery.md',
+    'changelog.md'
+  ];
+
+  await t.test('All 15 docs/*.md files and README.md exist, are non-empty, and have valid relative links', () => {
+    const readmePath = path.join(rootDir, 'README.md');
+    assert.ok(fs.existsSync(readmePath), 'README.md must exist');
+    const readmeContent = fs.readFileSync(readmePath, 'utf8');
+    assert.ok(readmeContent.length > 500, 'README.md must have substantial documentation content');
+
+    for (const fileName of expectedDocFiles) {
+      const fullPath = path.join(docsDir, fileName);
+      assert.ok(fs.existsSync(fullPath), `docs/${fileName} must exist`);
+      const content = fs.readFileSync(fullPath, 'utf8');
+      assert.ok(content.trim().length > 300, `docs/${fileName} must contain substantive documentation`);
+
+      // Check local markdown links [label](target)
+      const linkRegex = /\[[^\]]+\]\(([^)#]+)(?:#[^)]*)?\)/g;
+      let match;
+      while ((match = linkRegex.exec(content)) !== null) {
+        const target = match[1].trim();
+        if (target.startsWith('http://') || target.startsWith('https://') || target.startsWith('mailto:') || target.startsWith('/')) {
+          continue;
+        }
+        const resolved = path.resolve(docsDir, target);
+        assert.ok(fs.existsSync(resolved), `Broken relative link "${target}" in docs/${fileName}`);
+      }
+    }
+  });
+
+  await t.test('Mermaid diagrams in docs/ use valid supported diagram headers and balanced blocks', () => {
+    const filesWithMermaid = ['business-overview.md', 'system-architecture.md', 'database-design.md'];
+    const validHeaders = /^(flowchart\s+(TD|TB|LR|RL|BT)|graph\s+(TD|TB|LR|RL|BT)|sequenceDiagram|erDiagram|stateDiagram(-v2)?|classDiagram)/;
+
+    for (const fileName of filesWithMermaid) {
+      const content = fs.readFileSync(path.join(docsDir, fileName), 'utf8');
+      const blocks = [...content.matchAll(/```mermaid\r?\n([\s\S]*?)```/g)];
+      assert.ok(blocks.length >= 1, `docs/${fileName} must contain at least one Mermaid diagram`);
+      for (const blk of blocks) {
+        const body = blk[1].trim();
+        assert.match(body, validHeaders, `Mermaid block in docs/${fileName} must start with a valid diagram declaration`);
+      }
+    }
+  });
+
+  await t.test('Website Help Center content module supports all /docs routes and case-insensitive search', async () => {
+    const docsModulePath = path.join(rootDir, 'client', 'src', 'data', 'docsContent.js');
+    assert.ok(fs.existsSync(docsModulePath), 'client/src/data/docsContent.js must exist');
+    const docsContent = await import(`file://${docsModulePath.replace(/\\/g, '/')}`);
+
+    assert.equal(docsContent.DOCS_ROUTES.length, 5);
+    assert.equal(docsContent.resolveDocSlugFromPath('/docs'), 'getting-started');
+    assert.equal(docsContent.resolveDocSlugFromPath('/docs/getting-started'), 'getting-started');
+    assert.equal(docsContent.resolveDocSlugFromPath('/docs/user-guide'), 'user-guide');
+    assert.equal(docsContent.resolveDocSlugFromPath('/docs/features'), 'features');
+    assert.equal(docsContent.resolveDocSlugFromPath('/docs/troubleshooting'), 'troubleshooting');
+    assert.equal(docsContent.resolveDocSlugFromPath('/docs/faq'), 'faq');
+
+    const waterHits = docsContent.searchDocumentation('RAPID WATER');
+    assert.ok(waterHits.length > 0, 'Case-insensitive search for RAPID WATER must return matches');
+
+    const fifoHits = docsContent.searchDocumentation('fifo');
+    assert.ok(fifoHits.length > 0, 'Search for fifo must return matches');
+
+    const noHits = docsContent.searchDocumentation('xyznonexistentkeyword987654');
+    assert.equal(noHits.length, 0, 'Non-matching search query must return empty array');
+  });
+});

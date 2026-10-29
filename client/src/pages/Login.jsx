@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Lock, Mail, ArrowRight } from 'lucide-react';
+import { Lock, Mail, ArrowRight, BookOpen } from 'lucide-react';
 
-export default function Login() {
+export default function Login({ onOpenDocs }) {
   const { login } = useAuth();
   const isDev = Boolean(import.meta.env?.DEV);
   const [emailOrPhone, setEmailOrPhone] = useState('');
@@ -158,6 +158,35 @@ export default function Login() {
               }}
             >
               ⚡ Auto-fill Default Admin (admin@ocean.com)
+            </button>
+          </div>
+        )}
+
+        {/* Help & Documentation Center link */}
+        {onOpenDocs && (
+          <div style={{
+            borderTop: '1px solid #f1f5f9',
+            paddingTop: '12px',
+            textAlign: 'center'
+          }}>
+            <button
+              type="button"
+              onClick={onOpenDocs}
+              className="docs-focusable"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#475569',
+                fontSize: '12.5px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <BookOpen size={14} color="#0284c7" />
+              <span>Help & Documentation Center (/docs)</span>
             </button>
           </div>
         )}

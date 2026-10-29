@@ -16,13 +16,48 @@ import Orders from './pages/Orders';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
+import DocumentationCenter from './pages/DocumentationCenter';
+import { resolveDocSlugFromPath } from './data/docsContent';
+
+function isDocsPathname(pathname = '') {
+  return pathname === '/docs' || pathname.startsWith('/docs/');
+}
 
 function MainApp() {
   const { isAuthenticated, loading } = useAuth();
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() =>
+    typeof window !== 'undefined' && isDocsPathname(window.location.pathname) ? 'docs' : 'dashboard'
+  );
+  const [docSlug, setDocSlug] = useState(() =>
+    typeof window !== 'undefined' ? resolveDocSlugFromPath(window.location.pathname) : 'getting-started'
+  );
   const [searchOpen, setSearchOpen] = useState(false);
   const [openNewOrderModal, setOpenNewOrderModal] = useState(false);
   const [selectedCustomerIdForView, setSelectedCustomerIdForView] = useState(null);
+
+  const handleSelectDocSlug = (slug) => {
+    const targetSlug = slug || 'getting-started';
+    setDocSlug(targetSlug);
+    setActiveTab('docs');
+    if (typeof window !== 'undefined') {
+      const nextPath = `/docs/${targetSlug}`;
+      if (window.location.pathname !== nextPath) {
+        window.history.pushState({}, '', nextPath);
+      }
+    }
+  };
+
+  const handleSetTab = (tab) => {
+    setSelectedCustomerIdForView(null);
+    if (tab === 'docs') {
+      handleSelectDocSlug(docSlug || 'getting-started');
+      return;
+    }
+    setActiveTab(tab);
+    if (typeof window !== 'undefined' && isDocsPathname(window.location.pathname)) {
+      window.history.pushState({}, '', '/');
+    }
+  };
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -31,8 +66,21 @@ function MainApp() {
         setSearchOpen((prev) => !prev);
       }
     };
+    const handlePopState = () => {
+      const path = window.location.pathname;
+      if (isDocsPathname(path)) {
+        setDocSlug(resolveDocSlugFromPath(path));
+        setActiveTab('docs');
+      } else {
+        setActiveTab((prev) => (prev === 'docs' ? 'dashboard' : prev));
+      }
+    };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('popstate', handlePopState);
+    };
   }, []);
 
   if (loading) {
@@ -48,16 +96,27 @@ function MainApp() {
   }
 
   if (!isAuthenticated) {
-    return <Login />;
+    if (activeTab === 'docs') {
+      return (
+        <DocumentationCenter
+          standalone={true}
+          isAuthenticated={false}
+          activeSlug={docSlug}
+          onSelectSlug={handleSelectDocSlug}
+          onExitDocs={() => handleSetTab('dashboard')}
+        />
+      );
+    }
+    return <Login onOpenDocs={() => handleSelectDocSlug('getting-started')} />;
   }
 
   const handleSelectCustomerFromSearch = (c) => {
     setSelectedCustomerIdForView(c.id);
-    setActiveTab('customers');
+    handleSetTab('customers');
   };
 
   const handleSelectOrderFromSearch = () => {
-    setActiveTab('orders');
+    handleSetTab('orders');
   };
 
   return (
@@ -65,19 +124,16 @@ function MainApp() {
       {/* Navigation (Sidebar, Header, Mobile Bottom Bar, and Page Content) */}
       <Navigation
         activeTab={activeTab}
-        setActiveTab={(tab) => {
-          setSelectedCustomerIdForView(null);
-          setActiveTab(tab);
-        }}
+        setActiveTab={handleSetTab}
         onOpenSearch={() => setSearchOpen(true)}
-        onQuickWater={() => setActiveTab('water')}
+        onQuickWater={() => handleSetTab('water')}
       >
         {activeTab === 'dashboard' && (
           <Dashboard
-            setActiveTab={setActiveTab}
-            onQuickWater={() => setActiveTab('water')}
+            setActiveTab={handleSetTab}
+            onQuickWater={() => handleSetTab('water')}
             onNewOrder={() => {
-              setActiveTab('orders');
+              handleSetTab('orders');
               setOpenNewOrderModal(true);
             }}
           />
@@ -88,7 +144,7 @@ function MainApp() {
         {activeTab === 'whatsapp' && <WhatsAppOrders />}
 
         {activeTab === 'deliveries' && (
-          <Deliveries onOpenRouteMap={() => setActiveTab('route')} />
+          <Deliveries onOpenRouteMap={() => handleSetTab('route')} />
         )}
 
         {activeTab === 'route' && <DeliveryRoute />}
@@ -111,6 +167,18 @@ function MainApp() {
         {activeTab === 'reports' && <Reports />}
 
         {activeTab === 'settings' && <Settings />}
+
+        {activeTab === 'docs' && (
+          <DocumentationCenter
+            standalone={false}
+            isAuthenticated={true}
+            activeSlug={docSlug}
+            onSelectSlug={handleSelectDocSlug}
+            onExitDocs={() => handleSetTab('dashboard')}
+            onQuickWater={() => handleSetTab('water')}
+            onOpenWhatsApp={() => handleSetTab('whatsapp')}
+          />
+        )}
       </Navigation>
 
       {/* Global Search Modal */}

@@ -11,6 +11,8 @@ import {
   FileText, 
   BarChart3, 
   Settings, 
+  BookOpen,
+  HelpCircle,
   LogOut, 
   Menu, 
   X, 
@@ -33,7 +35,8 @@ export default function Navigation({ activeTab, setActiveTab, onOpenSearch, onQu
     { id: 'orders', label: 'All Orders', icon: FileText },
     { id: 'products', label: 'Inventory & Stock', icon: Package },
     { id: 'reports', label: 'Reports', icon: BarChart3 },
-    { id: 'settings', label: 'Settings', icon: Settings }
+    { id: 'settings', label: 'Settings', icon: Settings },
+    { id: 'docs', label: 'Help & Docs', icon: BookOpen }
   ];
 
   const handleNavClick = (id) => {
@@ -269,6 +272,27 @@ export default function Navigation({ activeTab, setActiveTab, onOpenSearch, onQu
             >
               <Droplet size={14} fill="white" />
               <span>+ Rapid Water</span>
+            </button>
+
+            <button
+              onClick={() => handleNavClick('docs')}
+              className="btn-secondary"
+              style={{
+                padding: '6px 10px',
+                borderRadius: '7px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                fontSize: '12px',
+                fontWeight: '600',
+                color: activeTab === 'docs' ? '#0284c7' : '#475569',
+                borderColor: activeTab === 'docs' ? '#bae6fd' : '#e2e8f0',
+                background: activeTab === 'docs' ? '#eff6ff' : '#ffffff'
+              }}
+              title="Help & Documentation Center (/docs)"
+            >
+              <HelpCircle size={14} color={activeTab === 'docs' ? '#0284c7' : '#64748b'} />
+              <span className="hide-on-mobile">Help</span>
             </button>
 
             <button 

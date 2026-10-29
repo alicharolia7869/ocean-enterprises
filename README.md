@@ -1,157 +1,244 @@
-# 🌊 Ocean Enterprises — Business Management System
-### Water Supply & Beverage Distribution Operations Platform
+# Ocean Enterprises — Business Management System
 
-[![Vercel Deployment](https://img.shields.io/badge/Deployed_on-Vercel-black?style=for-the-badge&logo=vercel)](https://ocean-enterprises.vercel.app)
-[![Node.js](https://img.shields.io/badge/Node.js-v20%2B-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Express](https://img.shields.io/badge/Express-5.x-000000?style=for-the-badge&logo=express&logoColor=white)](https://expressjs.com/)
-[![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
-[![Vite](https://img.shields.io/badge/Vite-8.x-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
-[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
+**Water Supply & Beverage Distribution Operations Platform**
 
-> 🚀 **Live Production Application**: **[https://ocean-enterprises.vercel.app](https://ocean-enterprises.vercel.app)**
-
-An enterprise-grade, high-velocity operational command center and CRM designed specifically for water supply plants, 20L packaged drinking water vendors, and beverage wholesale distributors.
+- **Production Website**: [https://ocean-enterprises.vercel.app/](https://ocean-enterprises.vercel.app/)
+- **In-App Help & Documentation Center**: [https://ocean-enterprises.vercel.app/docs](https://ocean-enterprises.vercel.app/docs)
+- **GitHub Repository**: [https://github.com/alicharolia7869/ocean-enterprises](https://github.com/alicharolia7869/ocean-enterprises)
 
 ---
 
-## 🌟 Key Highlights & Capabilities
+## 1. Project Purpose & Business Context
 
-### 1. 📊 Operations & Distribution Command Center
-* **Real-Time KPIs**: Live counters for Today's Total Orders, 20L Jars Delivered, Beverage Cases Sold, Active Deliveries, Today's Collected Revenue, and Outstanding Receivables.
-* **Plant Status Monitor**: Instant synchronization with operations and delivery vans.
-* **High-Speed Action Grid**: 1-click tactile navigation cards to log deliveries, process orders, and manage inventory.
+**Ocean Enterprises** is a packaged drinking water supply plant (20L refillable jars, 1L and 500ml bottled water) and wholesale cold-beverage distributor (Frooti, Appy Fizz, Thums Up, Smoodh, B Fizz) operating out of Jogeshwari (West), Mumbai.
 
-### 2. 💧 10-Second Rapid Water Supply Entry
-* Tailored specifically for fast-paced loading docks and delivery drivers.
-* **3D Tactile Quick-Tap Stepper Buttons**: Instant volume additions (`+1`, `+2`, `+5`, `+10`, `Reset`).
-* **Auto-Rate Calculation**: Automatically calculates totals based on customer-specific or standard jar rates (₹35/jar default).
-* **Instant WhatsApp Slip**: 1-click action to generate and dispatch formatted delivery receipts to customers directly via WhatsApp.
+Daily plant and distribution operations involve high-frequency transactions across restaurants, corporate offices, retail shops, and residential accounts:
+- **Rapid dockside & van water jar drops** that must be logged in seconds without creating multi-step invoices.
+- **Unstructured WhatsApp orders** sent by shopkeepers and restaurant managers (`"2 water bottles, 3 Thums Up, 2 Appy Fizz"`).
+- **Multi-stage dispatch and route management** with GPS stop pins and turn-by-turn Google Maps navigation for delivery drivers.
+- **Credit & partial-payment tracking**, where customers receive daily water jars or beverage cases and settle balances partially or monthly via Cash, UPI, Bank Transfer, or Cheque.
 
-### 3. 📱 WhatsApp Order Processing Engine (NLP Parser)
-* Accepts unstructured plain text orders received over WhatsApp (e.g. *"2 water bottles, 3 Thums Up, 2 Appy Fizz"*).
-* **Smart Natural Language Parser**: Automatically detects product names, matches catalog items, extracts quantities, calculates totals, and drafts the order ready for 1-click confirmation.
-* Supports **Accept Order**, **Mark Paid**, and **Generate WhatsApp Invoice** actions.
-
-### 4. 🗺️ Delivery Route Board & Interactive GPS Map
-* Interactive OpenStreetMap powered by Leaflet.
-* **Numbered Stop Sequence**: Visual delivery drop pins (`Stop #1`, `Stop #2`, `Stop #3`...).
-* **Turn-by-Turn Navigation**: 1-tap redirect to Google Maps with pre-filled destination coordinates for drivers.
-* Real-time delivery status updates: *New Order* ➔ *Confirmed* ➔ *Preparing* ➔ *Out for Delivery* ➔ *Delivered*.
-
-### 5. 👥 Customer Management & Monthly Ledgers
-* Directory categorized by *Restaurant*, *Office*, *Shop*, and *Residential*.
-* **Live Geolocation Capture**: "Use Current Location" button for delivery teams to pin exact customer shop coordinates via mobile GPS.
-* **Financial Accounts & Monthly Ledger**: View historical delivery records, daily breakdown of jars received, payments made, and current balance.
-* **1-Click WhatsApp Payment Reminder**: Automatically formats and sends an overdue reminder with UPI details.
-
-### 6. 📦 Inventory & Stock Alerts
-* Low-stock warnings when inventory drops below safety thresholds.
-* Real-time tracking of units sold, available stock, and cost vs. profit margins.
-
-### 7. 📈 Financial Reports & Multi-Format Exports
-* Breakdown of cash, online UPI, and pending credit transactions.
-* **Export Options**: 1-click downloadable reports in **CSV**, **Excel**, and **Printable PDF Slips**.
+The **Ocean Enterprises Business Management System** provides a unified web workspace for plant administrators and dispatch operators to manage these workflows end-to-end.
 
 ---
 
-## 🏗️ Architecture & Tech Stack
+## 2. Verified Technology Stack
 
-```
+Every technology listed below is verified directly from [`package.json`](package.json), [`client/package.json`](client/package.json), [`vercel.json`](vercel.json), and [`api/index.js`](api/index.js):
+
+| Layer | Technology | Version / Details |
+| :--- | :--- | :--- |
+| **Frontend UI** | React + React DOM | `^19.2.8` (SPA with state-driven workspace tabs and URL-synced `/docs` center) |
+| **Frontend Build & Dev** | Vite + `@vitejs/plugin-react` | Vite `^8.2.2`, `@vitejs/plugin-react` `^6.1.0` |
+| **Icons & Typography** | `lucide-react` + Google Fonts | `lucide-react` `^1.41.0`; `Outfit` & `Plus Jakarta Sans` |
+| **Maps & Geolocation** | Leaflet (CDN) + Browser Geolocation API | Leaflet `1.9.4` (OpenStreetMap tiles) + Google Maps deep links |
+| **Frontend Linter** | Oxlint | `^1.79.0` (`npm --prefix client run lint`) |
+| **Backend Runtime & Framework** | Node.js + Express | Node.js `v20+` / `v24.x`, Express `^5.2.1` |
+| **Database (Production)** | PostgreSQL (`pg`) | `pg` `^8.23.1` connected to managed Neon PostgreSQL via `DATABASE_URL` |
+| **Database (Local Fallback)** | JSON Document Store Adapter | [`server/db/database.js`](server/db/database.js) (`server/data/ocean_store.json`) when `DATABASE_URL` is unset |
+| **Authentication** | JWT + bcryptjs | `jsonwebtoken` `^9.0.3` (30-day Bearer tokens) + `bcryptjs` `^3.0.3` |
+| **Hosting & Serverless API** | Vercel | Static Vite build (`client/dist`) + Serverless Express entry ([`api/index.js`](api/index.js)) |
+| **Automated Testing** | Node.js Built-in Test Runner | `node --test test/suite.test.js` (60 automated integration & unit tests) |
+
+---
+
+## 3. Implemented Features
+
+1. **Operations & Distribution Command Dashboard** (`Dashboard.jsx`, `GET /api/dashboard/stats`)
+   - Live counters for Today's Total Orders, 20L Water Jars Delivered, Beverage Orders/Units, Pending Deliveries, Completed Deliveries Today, Pending Payments, Today's Revenue, and Monthly Revenue.
+   - **Live Dispatch Pipeline** breakdown (`New Order`, `Confirmed`, `Preparing`, `Out for Delivery`, `Delivered`).
+   - Quick-action launcher grid, active orders status selector, and low-stock inventory alert panel.
+2. **10-Second Rapid Water Supply Entry** (`WaterEntry.jsx`, `/api/water`, `/api/water/summary`)
+   - Searchable customer selector, tactile quantity increment buttons (`+1`, `+2`, `+5`, `+10`, `Reset`), customizable jar rate (default `₹35`), `Paid` / `Pending` toggle, payment mode selector, automatic inventory deduction, and 1-click WhatsApp receipt dispatch.
+   - Monthly Customer Water Summary table with per-customer jar counts, billed totals, paid amounts, and pending dues.
+3. **WhatsApp Order Processing Engine** (`WhatsAppOrders.jsx`, `POST /api/orders/parse-whatsapp`)
+   - Rule-based keyword and regular-expression parser that extracts customer identity, catalog products, and quantities from unstructured WhatsApp messages, calculates line subtotals, and creates structured orders with 1 click.
+   - Pre-formatted WhatsApp deep-link generators for Order Confirmation, Out for Delivery, Delivered, Payment Reminder, and Shareable Order Catalog Template.
+4. **Delivery Management Board & Interactive Route Map** (`Deliveries.jsx`, `DeliveryRoute.jsx`, `/api/deliveries`)
+   - Stop sequence ordering (`route_sequence`) with up/down reordering controls, status progression (`New Order` -> `Confirmed` -> `Preparing` -> `Out for Delivery` -> `Delivered`), and driver notes.
+   - Interactive Leaflet + OpenStreetMap route map with numbered stop markers, dashed route polylines, and 1-click Google Maps turn-by-turn navigation.
+5. **Customer Directory, GPS Pinning & Monthly Ledgers** (`Customers.jsx`, `/api/customers`)
+   - Categorized customer records (`Restaurant`, `Shop`, `Office`, `Residential`) with live HTML5 GPS coordinate capture, full order/water/payment history modal, monthly financial ledger, and printable statements.
+6. **Payment & Receivables Management** (`Payments.jsx`, `/api/payments`)
+   - Supports full and partial payments linked to a specific order, a specific water entry, or automatically allocated **FIFO** (oldest unpaid orders first, then oldest unpaid water entries) inside a database transaction.
+   - Pending receivables sidebar with 1-click WhatsApp payment reminders containing the configured business UPI ID.
+7. **All Orders Management** (`Orders.jsx`, `/api/orders`)
+   - Multi-item manual order creation, time/status/payment/customer filters, CSV export, status updates, payment recording, and order cancellation/deletion with automatic inventory restoration.
+8. **Product Catalog & Stock Control** (`Products.jsx`, `/api/products`)
+   - Water and Beverage SKU management, cost vs. selling price margin display, `ADD` / `REMOVE` / `SET` stock adjustments (clamped at zero), and low-stock threshold alerts.
+9. **Business Reports & Exports** (`Reports.jsx`, `/api/reports/*`)
+   - Daily (14 days), Weekly (8 weeks), and Monthly (6 months) sales reports, Customer-wise financial ledgers, and Product-wise profitability reports with CSV export and print-ready statements.
+10. **Business Configuration & Security Settings** (`Settings.jsx`, `/api/settings`, `/api/auth/change-password`)
+    - Manage company profile, phone, WhatsApp number, warehouse address, UPI ID, and administrator password.
+11. **In-App Help & Documentation Center** (`DocumentationCenter.jsx`, `/docs`)
+    - Built-in searchable documentation center accessible at `/docs` (with subroutes `/docs/getting-started`, `/docs/user-guide`, `/docs/features`, `/docs/troubleshooting`, and `/docs/faq`) from both the login screen and the main workspace navigation.
+
+---
+
+## 4. Repository Structure
+
+```text
 Ocean/
-├── client/                     # Frontend (React 19 + Vite)
+├── api/
+│   └── index.js                  # Vercel serverless Express entry point (/api/* and /health)
+├── client/                       # React 19 + Vite frontend application
+│   ├── public/                   # Static assets and SVG icons
 │   ├── src/
-│   │   ├── components/         # Navigation, Modals, Global Search, UI Cards
-│   │   ├── context/            # Auth & State Management
-│   │   ├── pages/              # 12 Operational Views (Dashboard, WaterEntry, etc.)
-│   │   ├── services/           # REST API client
-│   │   └── utils/              # WhatsApp formatters & export helpers
-│   ├── index.html              # Outfit + Plus Jakarta Sans Typography
-│   └── vite.config.js          # Vite config with /api proxy to Express
-├── server/                     # Backend (Node.js + Express 5)
-│   ├── data/                   # JSON document data store
-│   ├── db/                     # Seed scripts and SQLite migration schemas
-│   ├── middleware/             # JWT Authentication & role protection
-│   ├── routes/                 # 10 Dedicated REST Route Handlers
-│   └── index.js                # Server entry point & static dist server
-└── package.json
+│   │   ├── components/           # Navigation.jsx, GlobalSearchModal.jsx
+│   │   ├── context/              # AuthContext.jsx (JWT session management)
+│   │   ├── data/                 # Structured documentation content for /docs help center
+│   │   ├── pages/                # 11 operational pages + Login.jsx + DocumentationCenter.jsx
+│   │   ├── services/             # api.js (centralized fetch client)
+│   │   ├── utils/                # whatsapp.js, maps.js, export.js
+│   │   ├── App.jsx               # Main workspace state router & /docs URL router
+│   │   ├── index.css             # Design tokens, responsive layout, component styles
+│   │   └── main.jsx              # React DOM root mount
+│   ├── index.html                # HTML shell, Google Fonts, Leaflet 1.9.4 CDN
+│   ├── package.json              # Frontend scripts and dependencies
+│   └── vite.config.js            # Vite dev server (port 3000) & /api proxy to port 5000
+├── docs/                         # Complete developer & operational documentation suite
+│   ├── index.md
+│   ├── business-overview.md
+│   ├── features.md
+│   ├── user-guide.md
+│   ├── system-architecture.md
+│   ├── database-design.md
+│   ├── api-reference.md
+│   ├── authentication-and-security.md
+│   ├── local-development.md
+│   ├── environment-configuration.md
+│   ├── deployment-guide.md
+│   ├── testing-and-validation.md
+│   ├── troubleshooting.md
+│   ├── maintenance-and-recovery.md
+│   └── changelog.md
+├── server/                       # Node.js + Express 5 backend
+│   ├── data/
+│   │   └── ocean_store.json      # Local JSON fallback data store
+│   ├── db/
+│   │   ├── database.js           # Dual-mode adapter (PostgreSQL primary / JSON fallback)
+│   │   ├── postgres.js           # pg Pool manager, SQL dialect normalizer, transactions
+│   │   ├── migrate.js            # Idempotent PostgreSQL schema + seed migration runner
+│   │   ├── schema.postgres.sql   # Production PostgreSQL DDL (9 tables + indexes)
+│   │   ├── schema.sql            # Reference SQLite DDL
+│   │   └── seed.js               # Demo/initial data seed script
+│   ├── middleware/
+│   │   └── auth.js               # JWT verification & role authorization middleware
+│   ├── routes/                   # 10 Express routers (auth, dashboard, customers, etc.)
+│   └── index.js                  # Standalone Express server (port 5000) + SPA static host
+├── test/
+│   └── suite.test.js             # Automated Node.js test suite (12 suites, 60 tests)
+├── .env.example                  # Safe template for environment variables
+├── package.json                  # Root backend dependencies and npm scripts
+├── README.md                     # Project overview and quick start
+└── vercel.json                   # Vercel build and URL rewrite configuration
 ```
 
 ---
 
-## 🚀 Quick Start Guide
+## 5. Quick Start (Local Development)
 
 ### Prerequisites
-* **Node.js**: v18+ or v20+ recommended
-* **npm**: v9+
+- **Node.js**: `v20.x` or later (`v24.x` supported and tested)
+- **npm**: `v9.x` or later
+- **PostgreSQL** *(optional for local dev; required for production persistence)*: Any standard PostgreSQL 14+ instance or Neon serverless database. When `DATABASE_URL` is omitted locally, the server automatically uses `server/data/ocean_store.json`.
 
-### 1. Installation
-Clone the repository and install root and client dependencies:
-
+### 1. Clone & Install Dependencies
 ```bash
-# Clone the repository
 git clone https://github.com/alicharolia7869/ocean-enterprises.git
 cd ocean-enterprises
 
-# Install backend dependencies
+# Install root backend dependencies
 npm install
 
 # Install frontend dependencies
-cd client
-npm install
-cd ..
+npm --prefix client install
 ```
 
-### 2. Seed Initial Database & Demo Data
-Initialize the catalog, mock customers, and sample transaction history:
-
+### 2. Configure Environment Variables
+Copy `.env.example` to `.env` (or `.env.local`) and set your local values:
 ```bash
-npm run seed
+cp .env.example .env
 ```
+See [`docs/environment-configuration.md`](docs/environment-configuration.md) for full details on `PORT`, `NODE_ENV`, `JWT_SECRET`, and `DATABASE_URL`.
 
-### 3. Build the Frontend
+### 3. Initialize / Seed Data (Optional)
+- **Local JSON store**: `npm run seed` populates `server/data/ocean_store.json` with initial catalog products, sample customers, and the default admin user.
+- **PostgreSQL database**: If `DATABASE_URL` is configured, run `npm run db:migrate` to apply [`server/db/schema.postgres.sql`](server/db/schema.postgres.sql) and migrate seed records non-destructively.
+
+### 4. Run in Development Mode
+You can run the backend on port `5000` and the Vite dev server (with `/api` proxy) on port `3000`:
+```bash
+# Terminal 1: Start Express API server on http://localhost:5000
+npm start
+
+# Terminal 2: Start Vite frontend dev server on http://localhost:3000
+npm run dev:client
+```
+Alternatively, build the frontend once and serve everything from the Express server on `http://localhost:5000`:
 ```bash
 npm run build
-```
-
-### 4. Start the Application
-```bash
 npm start
 ```
 
-Open your browser and navigate to:
-👉 **`http://localhost:5000`**
+---
+
+## 6. Testing, Linting & Production Build
+
+All commands below are verified against [`package.json`](package.json) and [`client/package.json`](client/package.json):
+
+```bash
+# Run the automated backend & database test suite
+npm test
+
+# Run frontend lint checks (oxlint)
+npm --prefix client run lint
+
+# Build the production frontend bundle into client/dist
+npm --prefix client run build
+```
 
 ---
 
-## 🔑 Default Login Credentials
+## 7. Deployment Overview
 
-| Role | Email / Phone | Password |
-|---|---|---|
-| **Admin** | `admin@ocean.com` | `admin123` |
+Ocean Enterprises is configured for zero-config deployment on **Vercel** via [`vercel.json`](vercel.json) and [`api/index.js`](api/index.js):
+1. **Build Command**: `npm run build` (installs `client` dependencies and runs `vite build` into `client/dist`).
+2. **Serverless API**: Requests matching `/api/(.*)` and `/health` are routed to [`api/index.js`](api/index.js).
+3. **SPA Routing**: All other routes (including `/docs` and `/docs/*`) are served by `client/dist/index.html`.
+4. **Required Production Environment Variables**:
+   - `DATABASE_URL`: PostgreSQL connection string (`postgresql://...`).
+   - `JWT_SECRET`: Strong random secret (`>= 16` characters; 256-bit hex recommended).
 
----
-
-## 📡 REST API Reference
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/auth/login` | Authenticate and issue JWT token |
-| `GET` | `/api/auth/me` | Fetch active user profile |
-| `GET` | `/api/dashboard/stats` | Aggregate daily/monthly business KPIs |
-| `GET` | `/api/water` | List water supply entries with date filters |
-| `POST` | `/api/water` | Rapid water jar entry with instant total |
-| `GET` | `/api/customers` | Customer directory with balances & GPS coords |
-| `POST` | `/api/customers` | Register customer with live GPS coordinates |
-| `GET` | `/api/products` | Inventory catalog and stock alert indicators |
-| `GET` | `/api/orders` | Orders list with delivery and payment status |
-| `POST` | `/api/orders` | Create standard or parsed WhatsApp order |
-| `GET` | `/api/deliveries/route` | Active delivery route ordered by geographic stop |
-| `GET` | `/api/payments` | Payment ledger and receivables breakdown |
-| `GET` | `/api/reports/summary` | Financial summary, sales by category, top clients |
-| `GET` | `/api/health` | System health check and heartbeat |
+See [`docs/deployment-guide.md`](docs/deployment-guide.md) for complete step-by-step instructions, health check verification, and rollback procedures.
 
 ---
 
-## 📜 License
+## 8. Complete Documentation Index
 
-This project is licensed under the MIT License.
+All detailed project documentation is located in the [`docs/`](docs/) directory:
+
+- **[Documentation Home (`docs/index.md`)](docs/index.md)** — Central map of all guides and references.
+- **[Business Overview (`docs/business-overview.md`)](docs/business-overview.md)** — Real-world water & beverage distribution workflows and how the software models them.
+- **[Feature Inventory (`docs/features.md`)](docs/features.md)** — Detailed specification, validation rules, and verification status of every implemented feature.
+- **[User Guide (`docs/user-guide.md`)](docs/user-guide.md)** — Step-by-step operator instructions for every screen in the application.
+- **[System Architecture (`docs/system-architecture.md`)](docs/system-architecture.md)** — Component architecture, request lifecycles, and Mermaid diagrams.
+- **[Database Design (`docs/database-design.md`)](docs/database-design.md)** — PostgreSQL relational schema, dual-mode JSON adapter, ER diagram, and FIFO ledger rules.
+- **[API Reference (`docs/api-reference.md`)](docs/api-reference.md)** — Complete endpoint-by-endpoint contract for all 10 REST route modules and health checks.
+- **[Authentication & Security (`docs/authentication-and-security.md`)](docs/authentication-and-security.md)** — JWT lifecycle, secret enforcement, password hashing, and access control.
+- **[Local Development (`docs/local-development.md`)](docs/local-development.md)** — Setup, scripts, dual-server workflow, and debugging tips.
+- **[Environment Configuration (`docs/environment-configuration.md`)](docs/environment-configuration.md)** — Reference for all supported environment variables across local and Vercel environments.
+- **[Deployment Guide (`docs/deployment-guide.md`)](docs/deployment-guide.md)** — Vercel configuration, PostgreSQL provisioning, migrations, and smoke tests.
+- **[Testing & Validation (`docs/testing-and-validation.md`)](docs/testing-and-validation.md)** — Breakdown of automated test suites, lint checks, and validation coverage.
+- **[Troubleshooting (`docs/troubleshooting.md`)](docs/troubleshooting.md)** — Solutions for sign-in errors, database connectivity, missing orders, and build issues.
+- **[Maintenance & Recovery (`docs/maintenance-and-recovery.md`)](docs/maintenance-and-recovery.md)** — Database backups, sequence synchronization, stock audits, and disaster recovery.
+- **[Changelog (`docs/changelog.md`)](docs/changelog.md)** — Chronological history of features, bug fixes, and architectural improvements.
+
+---
+
+## 9. Known Limitations & Verification Status
+
+- **Single-Role Workspace UI**: Although the backend database schema (`users.role`) and middleware (`requireRole`) support role strings, all protected API endpoints currently require `authMiddleware` (any valid signed-in user) and the UI provides a unified administrator/operator workspace rather than separate driver-only screens.
+- **WhatsApp Integration Mode**: Outbound WhatsApp notifications (`utils/whatsapp.js`) use `https://wa.me/` deep links that open WhatsApp Web or the mobile WhatsApp app with pre-formatted messages so the operator can click Send; the system does not use a paid WhatsApp Business Cloud API webhook for automated background sending.
+- **Route Optimization**: Delivery stop sequences (`route_sequence`) are reordered manually via up/down controls on the Delivery Management Board rather than an external paid travelling-salesperson (TSP) routing API.
+- **Verification Status**: All 60 automated tests in `test/suite.test.js`, frontend `oxlint` checks (`0` errors), and the Vite production build (`client/dist`) are verified and passing.
