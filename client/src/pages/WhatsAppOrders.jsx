@@ -41,16 +41,21 @@ export default function WhatsAppOrders() {
   const loadData = async () => {
     try {
       setLoadingOrders(true);
-      const [cRes, oRes, sRes] = await Promise.all([
+      const [cRes, oRes, sRes] = await Promise.allSettled([
         api.getCustomers(),
         api.getOrders(),
-        api.getPublicSettings().catch(() => ({ settings: {} }))
+        api.getPublicSettings()
       ]);
-      setCustomers(cRes.customers || []);
-      setBusinessSettings(sRes.settings || {});
-      // Filter orders from WhatsApp or all recent
-      const wa = (oRes.orders || []).filter(o => o.source === 'WhatsApp' || o.source === 'Manual');
-      setWhatsappOrders(wa);
+      if (cRes.status === 'fulfilled') {
+        setCustomers(cRes.value?.customers || []);
+      }
+      if (oRes.status === 'fulfilled') {
+        const wa = (oRes.value?.orders || []).filter(o => o.source === 'WhatsApp' || o.source === 'Manual');
+        setWhatsappOrders(wa);
+      }
+      if (sRes.status === 'fulfilled') {
+        setBusinessSettings(sRes.value?.settings || {});
+      }
     } catch (err) {
       console.error('Error loading WhatsApp orders:', err);
     } finally {
@@ -69,7 +74,19 @@ export default function WhatsAppOrders() {
       const res = await api.parseWhatsAppOrder(textToParse);
       setParsedResult(res);
 
+      // If customer list was empty, try fetching customers now
+      if (customers.length === 0) {
+        api.getCustomers().then(cRes => {
+          if (cRes.customers) setCustomers(cRes.customers);
+        }).catch(() => {});
+      }
+
       if (res.matchedCustomer) {
+        // Guarantee the matched customer is in the dropdown options
+        setCustomers(prev => {
+          const exists = prev.some(c => String(c.id) === String(res.matchedCustomer.id));
+          return exists ? prev : [res.matchedCustomer, ...prev];
+        });
         setSelectedCustomerId(String(res.matchedCustomer.id));
         setCustomerPhone(res.matchedCustomer.phone);
         setCustomerAddress(res.matchedCustomer.address);
@@ -250,15 +267,37 @@ export default function WhatsAppOrders() {
             {/* Customer Selector */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '16px' }}>
               <div>
-                <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                  Assign to Customer:
-                </label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569' }}>
+                    Assign to Customer:
+                  </label>
+                  {customers.length === 0 && (
+                    <button 
+                      type="button" 
+                      onClick={async () => {
+                        const res = await api.getCustomers().catch(() => ({ customers: [] }));
+                        if (res.customers) setCustomers(res.customers);
+                      }}
+                      style={{ border: 'none', background: 'transparent', color: '#0284c7', fontSize: '11px', cursor: 'pointer', fontWeight: '700' }}
+                    >
+                      ↻ Load Customers
+                    </button>
+                  )}
+                </div>
                 <select
                   className="form-select"
                   value={selectedCustomerId}
+                  onFocus={() => {
+                    if (customers.length === 0) {
+                      api.getCustomers().then(cRes => {
+                        if (cRes.customers) setCustomers(cRes.customers);
+                      }).catch(() => {});
+                    }
+                  }}
                   onChange={e => {
                     setSelectedCustomerId(e.target.value);
-                    const found = customers.find(c => String(c.id) === e.target.value);
+                    const found = customers.find(c => String(c.id) === e.target.value) ||
+                      (parsedResult?.matchedCustomer && String(parsedResult.matchedCustomer.id) === e.target.value ? parsedResult.matchedCustomer : null);
                     if (found) {
                       setCustomerPhone(found.phone);
                       setCustomerAddress(found.address);
@@ -266,6 +305,11 @@ export default function WhatsAppOrders() {
                   }}
                 >
                   <option value="">-- Choose Customer --</option>
+                  {parsedResult?.matchedCustomer && !customers.some(c => String(c.id) === String(parsedResult.matchedCustomer.id)) && (
+                    <option value={parsedResult.matchedCustomer.id}>
+                      {parsedResult.matchedCustomer.business_name ? `${parsedResult.matchedCustomer.business_name} (${parsedResult.matchedCustomer.name})` : parsedResult.matchedCustomer.name} - {parsedResult.matchedCustomer.phone}
+                    </option>
+                  )}
                   {customers.map(c => (
                     <option key={c.id} value={c.id}>
                       {c.business_name ? `${c.business_name} (${c.name})` : c.name} - {c.phone}
