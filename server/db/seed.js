@@ -92,8 +92,8 @@ async function seed() {
     {
       name: 'Ali Charolia',
       business_name: 'Ali Grand Hotel',
-      phone: '9819988776',
-      whatsapp_number: '9819988776',
+      phone: '9769900568',
+      whatsapp_number: '9769900568',
       address: 'National Highway 48 Junction, Block B',
       latitude: 19.0910,
       longitude: 72.8690,
