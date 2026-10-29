@@ -12,7 +12,9 @@ import {
   FileText, 
   Printer, 
   X,
-  CheckCircle2
+  CheckCircle2,
+  RefreshCw,
+  AlertCircle
 } from 'lucide-react';
 import { api } from '../services/api';
 import { openWhatsApp } from '../utils/whatsapp';
@@ -23,7 +25,8 @@ export default function Customers({ selectedCustomerIdToOpen }) {
   const [customers, setCustomers] = useState([]);
   const [typeFilter, setTypeFilter] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
-  const [, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -48,10 +51,12 @@ export default function Customers({ selectedCustomerIdToOpen }) {
   const loadCustomers = useCallback(async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const res = await api.getCustomers({ type: typeFilter, search: searchQuery });
       setCustomers(res.customers || []);
     } catch (err) {
       console.error('Error fetching customers:', err);
+      setLoadError(err.message || 'Failed to load customers from server');
     } finally {
       setLoading(false);
     }
@@ -188,17 +193,29 @@ export default function Customers({ selectedCustomerIdToOpen }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h2 style={{ fontSize: '24px', fontWeight: '800', color: '#0f172a' }}>
-            Customer Management ({customers.length})
+            Customer Management {loading && customers.length === 0 ? '(Loading...)' : `(${customers.length})`}
           </h2>
           <p style={{ fontSize: '13px', color: '#64748b' }}>
             Local shops, restaurants, offices, hotels, and recurring drinking water accounts
           </p>
         </div>
 
-        <button onClick={handleOpenAdd} className="btn btn-primary" style={{ padding: '10px 20px' }}>
-          <Plus size={18} />
-          <span>Add New Customer</span>
-        </button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button 
+            onClick={loadCustomers} 
+            className="btn btn-secondary" 
+            title="Refresh Customers List"
+            style={{ padding: '10px 14px' }}
+          >
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            <span>{loading ? 'Refreshing...' : 'Refresh'}</span>
+          </button>
+
+          <button onClick={handleOpenAdd} className="btn btn-primary" style={{ padding: '10px 20px' }}>
+            <Plus size={18} />
+            <span>Add New Customer</span>
+          </button>
+        </div>
       </div>
 
       {/* Filter and Search Bar */}
@@ -241,6 +258,43 @@ export default function Customers({ selectedCustomerIdToOpen }) {
           </div>
         </div>
       </div>
+
+      {/* Error Alert with Retry */}
+      {loadError && (
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '12px', padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#b91c1c' }}>
+            <AlertCircle size={20} />
+            <div>
+              <div style={{ fontWeight: '700', fontSize: '14px' }}>Could not load customer accounts</div>
+              <div style={{ fontSize: '12.5px', color: '#7f1d1d' }}>{loadError}. Database may be connecting.</div>
+            </div>
+          </div>
+          <button onClick={loadCustomers} className="btn btn-primary" style={{ background: '#dc2626', borderColor: '#b91c1c' }}>
+            <RefreshCw size={14} />
+            <span>Retry Connection</span>
+          </button>
+        </div>
+      )}
+
+      {/* Loading Indicator */}
+      {loading && customers.length === 0 && (
+        <div className="ocean-card" style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
+          <RefreshCw size={28} className="animate-spin" color="#0284c7" style={{ margin: '0 auto 12px auto' }} />
+          <div style={{ fontWeight: '700', fontSize: '16px', color: '#0f172a' }}>Loading customer accounts...</div>
+          <div style={{ fontSize: '13px', marginTop: '4px' }}>Connecting to live database...</div>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {!loading && !loadError && customers.length === 0 && (
+        <div className="ocean-card" style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
+          <div style={{ fontSize: '32px', marginBottom: '10px' }}>👥</div>
+          <div style={{ fontWeight: '700', fontSize: '16px', color: '#0f172a' }}>No customers found</div>
+          <div style={{ fontSize: '13px', marginTop: '4px' }}>
+            {searchQuery || typeFilter !== 'All' ? 'Try adjusting your search query or customer category filter.' : 'Click "Add New Customer" above to register your first client.'}
+          </div>
+        </div>
+      )}
 
       {/* Customer Cards Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
