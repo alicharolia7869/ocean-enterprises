@@ -37,6 +37,7 @@ export default function WhatsAppOrders() {
   const [whatsappOrders, setWhatsappOrders] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
   const [businessSettings, setBusinessSettings] = useState(null);
+  const [confirmedOrderBanner, setConfirmedOrderBanner] = useState(null);
 
   const loadData = async () => {
     try {
@@ -119,12 +120,51 @@ export default function WhatsAppOrders() {
       };
 
       const res = await api.createOrder(payload);
-      alert(`Order #${res.order.order_number} created successfully from WhatsApp!`);
-      
-      // Clear parser
+
+      // Find the customer details to trigger WhatsApp order confirmation
+      const targetCustomer = customers.find(c => String(c.id) === String(selectedCustomerId)) ||
+        (parsedResult?.matchedCustomer && String(parsedResult.matchedCustomer.id) === String(selectedCustomerId) ? parsedResult.matchedCustomer : null) ||
+        { 
+          id: selectedCustomerId, 
+          name: 'Customer', 
+          business_name: '', 
+          phone: customerPhone, 
+          whatsapp_number: customerPhone, 
+          address: customerAddress 
+        };
+
+      const fullOrder = {
+        ...res.order,
+        items: payload.items,
+        total_amount: parsedResult.totalAmount,
+        payment_status: 'Pending',
+        delivery_status: 'New Order',
+        delivery_address: customerAddress,
+        customer_name: targetCustomer.name,
+        business_name: targetCustomer.business_name,
+        customer_phone: targetCustomer.phone || customerPhone,
+        customer_whatsapp: targetCustomer.whatsapp_number || targetCustomer.phone || customerPhone
+      };
+
+      // 1. Immediately trigger WhatsApp confirmation deep link
+      sendOrderConfirmation(targetCustomer, fullOrder);
+
+      // 2. Set banner state with quick re-send action
+      setConfirmedOrderBanner({
+        orderNumber: res.order.order_number,
+        customer: targetCustomer,
+        order: fullOrder
+      });
+
+      // 3. Prepend into local queue immediately so it renders instantly
+      setWhatsappOrders(prev => [fullOrder, ...prev]);
+
+      // 4. Clear parser inputs
       setRawText('');
       setParsedResult(null);
       setSpecialInstructions('');
+
+      // 5. Reload queue in background
       loadData();
     } catch (err) {
       alert('Error saving order: ' + err.message);
@@ -191,6 +231,54 @@ export default function WhatsAppOrders() {
           </button>
         </div>
       </div>
+
+      {/* Confirmation Success Banner with WhatsApp Trigger */}
+      {confirmedOrderBanner && (
+        <div style={{
+          background: '#ecfdf5',
+          border: '1px solid #10b981',
+          borderRadius: '14px',
+          padding: '16px 20px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px',
+          boxShadow: '0 2px 8px rgba(16, 185, 129, 0.12)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ background: '#10b981', color: 'white', padding: '8px', borderRadius: '50%', display: 'flex' }}>
+              <CheckCircle size={20} />
+            </div>
+            <div>
+              <div style={{ fontWeight: '800', fontSize: '15px', color: '#065f46' }}>
+                Order #{confirmedOrderBanner.orderNumber} Created Successfully! 🌊
+              </div>
+              <div style={{ fontSize: '13px', color: '#047857', marginTop: '2px' }}>
+                WhatsApp confirmation was prepared for <strong>{confirmedOrderBanner.customer?.business_name || confirmedOrderBanner.customer?.name}</strong> ({confirmedOrderBanner.customer?.whatsapp_number || confirmedOrderBanner.customer?.phone}).
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <button
+              onClick={() => sendOrderConfirmation(confirmedOrderBanner.customer, confirmedOrderBanner.order)}
+              className="btn btn-whatsapp"
+              style={{ padding: '8px 16px', fontSize: '13px', fontWeight: '700' }}
+            >
+              <Send size={15} />
+              <span>Send WhatsApp Confirmation</span>
+            </button>
+            <button
+              onClick={() => setConfirmedOrderBanner(null)}
+              style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b', fontSize: '16px', padding: '6px' }}
+              title="Dismiss Banner"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Parser Box */}
       <div className="ocean-card" style={{ border: '1px solid #a7f3d0', background: '#ffffff' }}>
